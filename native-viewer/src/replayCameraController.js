@@ -1170,6 +1170,35 @@ function buildPlayerChaseCamera(ballPos, playerManager, playerCard, payload, fra
   return makeDesired(position, target, cameraSettings.fieldOfView, label, { fovIsHorizontal: true });
 }
 
+function buildAutoPlayerPovCamera(ballPos, metrics, payload, frame, settings, cameraState) {
+  if (settings?.autoPlayerPov === false) return null;
+  const nearest = metrics?.nearest;
+  const active = Number(cameraState?.autoPovUntil || 0) > frame;
+
+  if (!active) {
+    if (frame < Number(cameraState?.autoPovCooldownUntil || 0)) return null;
+    const centerDistance = Math.hypot(ballPos.x, ballPos.z);
+    const inPlayableView = Math.abs(ballPos.x) < 3300 && Math.abs(ballPos.z) < 4700 && ballPos.y < 1250;
+    const closeControl = nearest?.player && Number(metrics?.nearestDistance ?? Infinity) < 620 && Number(metrics?.pressure ?? 0) > 0.42;
+    if (!closeControl || !inPlayableView || centerDistance < 720) return null;
+    cameraState.autoPovUntil = frame + (Number(metrics.pressure ?? 0) > 0.72 ? 96 : 72);
+    cameraState.autoPovCooldownUntil = frame + 300;
+    cameraState.autoPovPlayerName = normalizeName(nearest.card?.player_name || nearest.player?.playerName);
+  }
+
+  if (!nearest?.player || Number(metrics?.nearestDistance ?? Infinity) > 1050) {
+    cameraState.autoPovUntil = 0;
+    return null;
+  }
+
+  const desired = buildPlayerChaseCamera(ballPos, nearest.player, nearest.card, payload, frame, settings);
+  desired.label = 'auto player POV';
+  desired.phaseId = 'player-pov';
+  desired.phaseLabel = nearest.card?.player_name || nearest.player?.playerName || 'player POV';
+  desired.followPreset = { posRate: 9.2, targetRate: 11.2, fovRate: 6.0 };
+  return desired;
+}
+
 function resetState(ballPos, trackedPos, lastBallPos, lastTrackedPos, frame, goalFrames) {
   if (!lastBallPos || !lastTrackedPos) return { resetLike: true, hardReset: true };
   const ballJump = ballPos.distanceTo(lastBallPos);
@@ -1201,6 +1230,10 @@ function computeDesiredCamera({ cameraMode, ballPos, ballVelocity, metrics, play
   if (cameraMode === 'tactical') return buildTacticalCamera(ballPos, metrics);
   if (cameraMode === 'blue-goal') return buildEndlineCamera(ballPos, metrics, false);
   if (cameraMode === 'orange-goal') return buildEndlineCamera(ballPos, metrics, true);
+  if (cameraMode === 'director' || cameraMode === 'replay') {
+    const autoPov = buildAutoPlayerPovCamera(ballPos, metrics, payload, frame, settings, cameraState);
+    if (autoPov) return autoPov;
+  }
   if (cameraMode === 'director') return buildDirectorCamera(ballPos, ballVelocity, metrics, cameraState, settings, frame);
   return buildReplayCamera(ballPos, ballVelocity, metrics, cameraState, settings, frame);
 }
@@ -1326,6 +1359,9 @@ export function useReplayCamera({
       resetCooldown: 0,
       rescueFrames: 0,
       stallFrames: 0,
+      autoPovUntil: 0,
+      autoPovCooldownUntil: 0,
+      autoPovPlayerName: '',
     };
 
     const hiddenVisualState = {
@@ -1422,12 +1458,12 @@ export function useReplayCamera({
         cameraState.railSide = (cameraState.railSide || 1) * -1;
       }
       const followPreset = desired.followPreset || null;
-      const basePosRate = followPreset?.posRate ?? (playerLike ? 24.0 : cameraMode === 'director' ? 2.8 : 3.7);
-      const baseTargetRate = followPreset?.targetRate ?? (playerLike ? 22.0 : cameraMode === 'director' ? 3.4 : 4.3);
-      const baseFovRate = followPreset?.fovRate ?? (playerLike ? 7.0 : cameraMode === 'director' ? 2.8 : 3.5);
+      const basePosRate = followPreset?.posRate ?? (playerLike ? 24.0 : cameraMode === 'director' ? 3.5 : 4.5);
+      const baseTargetRate = followPreset?.targetRate ?? (playerLike ? 22.0 : cameraMode === 'director' ? 4.3 : 5.4);
+      const baseFovRate = followPreset?.fovRate ?? (playerLike ? 7.0 : cameraMode === 'director' ? 3.3 : 4.0);
       const positionAlphaBase = hardReset ? 1 : resetLike ? 0.42 : 1 - Math.exp(-frameDelta * basePosRate);
       const targetAlphaBase = hardReset ? 1 : resetLike ? 0.48 : 1 - Math.exp(-frameDelta * baseTargetRate);
-      const phaseBoost = phaseChanged && !hardReset && !resetLike && cameraState.resetCooldown === 0 ? (cameraMode === 'director' ? 0.006 : 0.014) : 0;
+      const phaseBoost = phaseChanged && !hardReset && !resetLike && cameraState.resetCooldown === 0 ? (cameraMode === 'director' ? 0.004 : 0.01) : 0;
       const positionAlpha = clamp(positionAlphaBase + phaseBoost, 0, 1);
       const targetAlpha = clamp(targetAlphaBase + phaseBoost * 1.25, 0, 1);
       const fovAlpha = hardReset ? 1 : clamp((1 - Math.exp(-frameDelta * baseFovRate)) + phaseBoost * 0.5, 0, 1);

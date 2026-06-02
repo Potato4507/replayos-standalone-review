@@ -17,7 +17,7 @@ from .semantics import build_replay_timeline
 from .youtube_sync import replay_videos as synced_replay_videos
 
 TEAM_ELO_CACHE_VERSION = "team-power-model-v6"
-REPLAY_REVIEW_CACHE_VERSION = "replay-review-v2"
+REPLAY_REVIEW_CACHE_VERSION = "replay-review-v3"
 _RANKING_NOISE_PATTERN = re.compile(r"^(team ?\d+|\d+%?|\d+ ?x ?\d+)$", re.IGNORECASE)
 
 
@@ -2028,6 +2028,9 @@ def _build_player_impact(events: list[dict[str, Any]], replay_eval: dict[str, An
             "edge_score": float(row.get("impact") or 0.0),
             "probability_swing": float(row.get("net_probability_swing") or 0.0),
             "swing_points": float(row.get("net_swing_points") or 0.0),
+            "created_advantage_points": float(row.get("created_advantage_points") or 0.0),
+            "lost_advantage_points": float(row.get("lost_advantage_points") or 0.0),
+            "involvement_points": float(row.get("involvement_points") or 0.0),
         }
         for row in replay_eval.get("player_net", [])
         if row.get("player_name")
@@ -2152,16 +2155,28 @@ def _build_player_impact(events: list[dict[str, Any]], replay_eval: dict[str, An
         raw_edge = float(impact_row.get("edge_score") or 0.0)
         probability_swing = float(impact_row.get("probability_swing") or 0.0)
         swing_points = float(impact_row.get("swing_points") or 0.0)
+        created_advantage = float(impact_row.get("created_advantage_points") or 0.0)
+        lost_advantage = float(impact_row.get("lost_advantage_points") or 0.0)
+        involvement = float(impact_row.get("involvement_points") or (created_advantage + lost_advantage))
+        impact_score = created_advantage - lost_advantage * 0.55 + max(0.0, float(bucket.get("clutch_swing_points") or 0.0)) * 0.2
         bucket["net_impact"] = round(raw_edge, 4)
         bucket["net_probability_swing"] = round(probability_swing, 4)
         bucket["net_swing_points"] = round(swing_points, 1)
+        bucket["created_advantage_points"] = round(created_advantage, 1)
+        bucket["lost_advantage_points"] = round(lost_advantage, 1)
+        bucket["involvement_points"] = round(involvement, 1)
+        bucket["impact_score_points"] = round(impact_score, 1)
+        bucket["advantage_delta_points"] = round(created_advantage - lost_advantage, 1)
         bucket["impact_per_touch"] = round(raw_edge / max(bucket["touches"], 1), 4)
-        bucket["advantage_per_touch_points"] = round(swing_points / max(bucket["touches"], 1), 1)
+        bucket["advantage_per_touch_points"] = round(created_advantage / max(bucket["touches"], 1), 1)
+        bucket["net_per_touch_points"] = round(swing_points / max(bucket["touches"], 1), 1)
         bucket["clutch_impact"] = round(float(bucket["clutch_impact"]), 4)
         bucket["clutch_swing_points"] = round(float(bucket.get("clutch_swing_points") or 0.0), 1)
         ordered_players.append(bucket)
     ordered_players.sort(
         key=lambda item: (
+            float(item.get("impact_score_points") or 0.0),
+            float(item.get("created_advantage_points") or 0.0),
             float(item.get("net_swing_points") or 0.0),
             float(item.get("clutch_swing_points") or 0.0),
             int(item.get("goals") or 0),
@@ -2313,6 +2328,8 @@ def build_replay_eval(
     ledger = details["ledger"]
     player_totals = details["player_totals"]
     player_probability_totals = details["player_probability_totals"]
+    player_positive_totals = details["player_positive_totals"]
+    player_negative_totals = details["player_negative_totals"]
     team_totals = details["team_totals"]
     score = details["score"]
     base_probability = details["base_probability"]
@@ -2360,8 +2377,19 @@ def build_replay_eval(
                 "impact": round(player_totals.get(name, 0.0), 4),
                 "net_probability_swing": round(player_probability_totals.get(name, 0.0), 4),
                 "net_swing_points": round(player_probability_totals.get(name, 0.0) * 100.0, 1),
+                "created_advantage_points": round(player_positive_totals.get(name, 0.0), 1),
+                "lost_advantage_points": round(player_negative_totals.get(name, 0.0), 1),
+                "involvement_points": round(player_positive_totals.get(name, 0.0) + player_negative_totals.get(name, 0.0), 1),
             }
-            for name, _ in sorted(player_probability_totals.items(), key=lambda item: abs(item[1]), reverse=True)[:10]
+            for name, _ in sorted(
+                player_probability_totals.items(),
+                key=lambda item: (
+                    player_positive_totals.get(item[0], 0.0) - player_negative_totals.get(item[0], 0.0) * 0.55,
+                    player_positive_totals.get(item[0], 0.0),
+                    item[1],
+                ),
+                reverse=True,
+            )
         ],
         "team_net": {
             color: round(value * 100.0, 1)
@@ -2381,6 +2409,8 @@ def _replay_eval_details(events: list[dict[str, Any]], predictions: list[dict[st
     ledger: list[dict[str, Any]] = []
     player_totals: dict[str, float] = {}
     player_probability_totals: dict[str, float] = {}
+    player_positive_totals: dict[str, float] = {}
+    player_negative_totals: dict[str, float] = {}
     team_totals = {"blue": 0.0, "orange": 0.0}
     for event in ordered:
         delta = _edge_delta(event)
@@ -2419,6 +2449,11 @@ def _replay_eval_details(events: list[dict[str, Any]], predictions: list[dict[st
         if actor_player:
             player_totals[actor_player] = player_totals.get(actor_player, 0.0) + actor_edge
             player_probability_totals[actor_player] = player_probability_totals.get(actor_player, 0.0) + actor_probability_swing
+            swing_points = actor_probability_swing * 100.0
+            if swing_points >= 0:
+                player_positive_totals[actor_player] = player_positive_totals.get(actor_player, 0.0) + swing_points
+            else:
+                player_negative_totals[actor_player] = player_negative_totals.get(actor_player, 0.0) + abs(swing_points)
         if actor_team in team_totals:
             team_totals[actor_team] += actor_probability_swing
     return {
@@ -2428,6 +2463,8 @@ def _replay_eval_details(events: list[dict[str, Any]], predictions: list[dict[st
         "ledger": ledger,
         "player_totals": player_totals,
         "player_probability_totals": player_probability_totals,
+        "player_positive_totals": player_positive_totals,
+        "player_negative_totals": player_negative_totals,
         "team_totals": team_totals,
     }
 

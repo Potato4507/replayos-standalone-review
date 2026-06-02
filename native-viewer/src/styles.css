@@ -68,7 +68,7 @@ button { user-select: none; }
 .native-scoreline > div {
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 10px;
+  border-radius: 8px;
   display: grid;
   gap: 0.2rem;
   min-width: 7rem;
@@ -322,11 +322,19 @@ button { user-select: none; }
   backdrop-filter: blur(10px);
   background: rgba(6, 10, 12, 0.74);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
+  border-radius: 8px;
   display: grid;
   gap: 0.35rem;
   padding: 0.55rem 0.7rem;
   width: 100%;
+}
+.native-boost-card.blue {
+  background: linear-gradient(90deg, rgba(4, 36, 44, 0.84), rgba(7, 18, 18, 0.74));
+  border-color: rgba(67, 225, 208, 0.32);
+}
+.native-boost-card.orange {
+  background: linear-gradient(90deg, rgba(70, 34, 11, 0.82), rgba(42, 20, 8, 0.74));
+  border-color: rgba(255, 196, 111, 0.38);
 }
 .compact .native-boost-card { padding: 0.4rem 0.55rem; }
 .native-boost-copy { display: grid; gap: 0.08rem; }
@@ -345,6 +353,9 @@ button { user-select: none; }
 .native-boost-fill { background: linear-gradient(90deg, #1ab1a3, #43e1d0); border-radius: 999px; inset: 0 auto 0 0; position: absolute; width: 0%; }
 .native-boost-rail.orange .native-boost-fill { background: linear-gradient(90deg, #f2874d, #ffc46f); }
 .native-boost-rail em { color: #f6f5ef; font-size: 0.72rem; font-style: normal; justify-self: end; padding-right: 0.45rem; position: relative; z-index: 1; }
+.native-boost-rail.blue { background: rgba(67, 225, 208, 0.11); }
+.native-boost-rail.orange { background: rgba(255, 154, 75, 0.13); }
+.native-boost-rail.orange em { padding-left: 0; padding-right: 0.45rem; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
 
 .native-selected-panel,
 .native-camera-telemetry {
@@ -435,7 +446,7 @@ canvas { display: block; }
   .native-boost-copy strong { font-size: 0.76rem; }
   .native-boost-rail { min-height: 0.5rem; }
   .native-boost-rail em { font-size: 0.62rem; padding-right: 0.32rem; }
-  .native-boost-rail.orange em { padding-left: 0.32rem; }
+  .native-boost-rail.orange em { padding-left: 0; padding-right: 0.32rem; }
   .native-controls-row,
   .native-controls-row.players,
   .native-setting-line { align-items: stretch; flex-direction: column; justify-content: flex-start; }

@@ -22,6 +22,7 @@ GameManager.builder = customGameBuilder;
 const DEFAULT_CAMERA_SETTINGS = {
   directorAggression: 0.58,
   playerLookMode: 'replay',
+  autoPlayerPov: true,
   showHud: true,
   showBoostHud: true,
   showTelemetry: false,
@@ -807,6 +808,7 @@ function SettingsControls({ settings, onChange }) {
       <div className="native-setting-line toggles">
         <button type="button" className={`native-chip compact ${settings.showHud ? 'active' : ''}`} onClick={() => patch({ showHud: !settings.showHud })}>Scorebug</button>
         <button type="button" className={`native-chip compact ${settings.showBoostHud ? 'active' : ''}`} onClick={() => patch({ showBoostHud: !settings.showBoostHud })}>Boost HUD</button>
+        <button type="button" className={`native-chip compact ${settings.autoPlayerPov ? 'active' : ''}`} onClick={() => patch({ autoPlayerPov: !settings.autoPlayerPov })}>Auto POV</button>
         <button type="button" className={`native-chip compact ${settings.showTelemetry ? 'active' : ''}`} onClick={() => patch({ showTelemetry: !settings.showTelemetry })}>Telemetry</button>
         <button type="button" className={`native-chip compact ${settings.showStatPanel ? 'active' : ''}`} onClick={() => patch({ showStatPanel: !settings.showStatPanel })}>Stats</button>
         <button type="button" className={`native-chip compact ${settings.compactBoost ? 'active' : ''}`} onClick={() => patch({ compactBoost: !settings.compactBoost })}>Compact</button>

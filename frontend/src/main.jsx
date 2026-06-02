@@ -165,6 +165,26 @@ function reviewMarkerMeta(eventType) {
   return { tone: 'event', short: 'E', label: labelFromSlug(normalized) || 'Event' };
 }
 
+function reviewMarkerPriority(eventType) {
+  const normalized = String(eventType || '').trim().toLowerCase();
+  if (normalized === 'goal') return 100;
+  if (normalized === 'shot') return 90;
+  if (normalized === 'save') return 88;
+  if (normalized === 'turnover') return 82;
+  if (normalized === 'pressure_phase' || normalized === 'pressure') return 72;
+  if (normalized === 'demo') return 66;
+  if (normalized === 'touch') return 20;
+  return 10;
+}
+
+function pickClusterHighlight(items) {
+  return (items || []).slice().sort((left, right) => {
+    const priorityDiff = reviewMarkerPriority(right.event_type) - reviewMarkerPriority(left.event_type);
+    if (priorityDiff) return priorityDiff;
+    return Math.abs(Number(right.swing || right.impact || 0)) - Math.abs(Number(left.swing || left.impact || 0));
+  })[0] || {};
+}
+
 function swingPointsText(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'n/a';
   const numeric = Number(value);
@@ -181,7 +201,12 @@ function impactSwingText(item) {
 
 function playerImpactSummaryText(item) {
   if (!item) return 'Waiting for player impact breakdown';
-  return `${item.goals || 0} G, ${item.positive_swings || 0} positive swings, ${swingPointsText(item.net_swing_points, 1)} net`;
+  return `${swingPointsText(item.impact_score_points, 1)} impact, ${number(item.created_advantage_points, 1)} created, ${number(item.lost_advantage_points, 1)} lost`;
+}
+
+function playerImpactDetailText(item) {
+  if (!item) return '';
+  return `${item.goals || 0} G, ${item.touches || 0} touches, ${number(item.created_advantage_points, 1)} created, ${number(item.lost_advantage_points, 1)} lost, ${swingPointsText(item.net_swing_points, 1)} net, ${swingPointsText(item.advantage_per_touch_points, 1)} per touch`;
 }
 
 function impactWindowText(item) {
@@ -1402,10 +1427,41 @@ function LiveRadar({ live, liveStatus, onRefresh, onError }) {
 function WinEdgeBar({ edge }) {
   const segments = edge?.segments || [];
   const duration = Number(segments.length ? segments[segments.length - 1]?.end_t : 0);
-  const highlights = (edge?.highlights || []).slice(0, 8);
+  const highlights = (edge?.highlights || []).slice(0, 12);
   const lanes = [];
   const laneGapPercent = 4.2;
-  const laidOutHighlights = highlights.map((highlight, index) => {
+  const clusteredHighlights = [];
+  highlights
+    .map((highlight, index) => {
+      const rawLeft = duration > 0 ? (Number(highlight.t || 0) / duration) * 100 : 0;
+      return {
+        ...highlight,
+        _left: Math.max(0, Math.min(100, rawLeft)),
+        _items: [highlight],
+        _sourceIndex: index,
+      };
+    })
+    .sort((left, right) => Number(left.t || 0) - Number(right.t || 0))
+    .forEach((highlight) => {
+      const last = clusteredHighlights[clusteredHighlights.length - 1];
+      if (last && highlight._left - last._left < 2.8) {
+        last._items.push(highlight);
+        last._key = `${last._key}-${highlight.event_type}-${highlight.t}`;
+        return;
+      }
+      clusteredHighlights.push({
+        ...highlight,
+        _key: `${highlight.event_type}-${highlight.t}-${highlight._sourceIndex}`,
+      });
+    });
+  const laidOutHighlights = clusteredHighlights.map((cluster) => {
+    const primary = pickClusterHighlight(cluster._items);
+    const highlight = {
+      ...cluster,
+      event_type: primary.event_type || cluster.event_type,
+      t: primary.t ?? cluster.t,
+      swing: primary.swing ?? cluster.swing,
+    };
     const rawLeft = duration > 0 ? (Number(highlight.t || 0) / duration) * 100 : 0;
     const left = Math.max(0, Math.min(100, rawLeft));
     let lane = lanes.findIndex((lastLeft) => left - lastLeft >= laneGapPercent);
@@ -1419,7 +1475,6 @@ function WinEdgeBar({ edge }) {
       ...highlight,
       _lane: lane,
       _left: left,
-      _key: `${highlight.event_type}-${highlight.t}-${index}`,
     };
   });
   const laneCount = Math.max(1, lanes.length);
@@ -1443,9 +1498,9 @@ function WinEdgeBar({ edge }) {
                   type="button"
                   className={`edge-highlight ${marker.tone}`}
                   style={{ left: `${highlight._left}%`, top: `calc(${highlight._lane} * 1.7rem)` }}
-                  title={`${marker.label} at ${number(highlight.t, 1)}s | Blue edge ${signedNumber(highlight.swing, 3)}`}
+                  title={`${marker.label} at ${number(highlight.t, 1)}s | Blue edge ${signedNumber(highlight.swing, 3)}${highlight._items.length > 1 ? ` | ${highlight._items.length} nearby swings` : ''}`}
                 >
-                  {marker.short}
+                  {highlight._items.length > 1 ? `${marker.short}+${highlight._items.length - 1}` : marker.short}
                 </button>
               );
             })}
@@ -3390,23 +3445,6 @@ function Viewer({ viewer, loading = false, selectedReplayCard = null, onRefreshR
     }
   }
 
-  if (!replay) {
-    if (loading && selectedReplayCard?.replay_id) {
-      return (
-        <div className="viewer-shell empty-state">
-          Loading {selectedReplayCard.title || `${selectedReplayCard.blue_team_name || 'Blue'} vs ${selectedReplayCard.orange_team_name || 'Orange'}`}...
-        </div>
-      );
-    }
-    return <div className="viewer-shell empty-state">Pick a replay to load the viewer.</div>;
-  }
-
-  const nativeViewerMessage = nativeStatus === 'failed'
-    ? (replay?.carball_status?.error || 'This replay does not have a usable local native-viewer parse yet.')
-    : nativeStatus === 'running'
-      ? 'This replay is still being parsed into 60 Hz native-viewer telemetry.'
-      : 'This replay is still metadata-only for the native 3D viewer. Pick a replay with a completed local parse to watch it here.';
-
   useEffect(() => {
     if (!nativeViewerReady || !nativeViewerSrc) return undefined;
     const frame = nativeFrameRef.current;
@@ -3439,6 +3477,23 @@ function Viewer({ viewer, loading = false, selectedReplayCard = null, onRefreshR
       if (timer) window.clearInterval(timer);
     };
   }, [nativeViewerReady, nativeViewerSrc, replay?.replay_id]);
+
+  if (!replay) {
+    if (loading && selectedReplayCard?.replay_id) {
+      return (
+        <div className="viewer-shell empty-state">
+          Loading {selectedReplayCard.title || `${selectedReplayCard.blue_team_name || 'Blue'} vs ${selectedReplayCard.orange_team_name || 'Orange'}`}...
+        </div>
+      );
+    }
+    return <div className="viewer-shell empty-state">Pick a replay to load the viewer.</div>;
+  }
+
+  const nativeViewerMessage = nativeStatus === 'failed'
+    ? (replay?.carball_status?.error || 'This replay does not have a usable local native-viewer parse yet.')
+    : nativeStatus === 'running'
+      ? 'This replay is still being parsed into 60 Hz native-viewer telemetry.'
+      : 'This replay is still metadata-only for the native 3D viewer. Pick a replay with a completed local parse to watch it here.';
 
   return (
     <div className="viewer-shell">
@@ -3666,9 +3721,9 @@ function Viewer({ viewer, loading = false, selectedReplayCard = null, onRefreshR
           <div className="stack-list">
             {playerImpact.slice(0, 8).map((item, index) => (
               <div className="stack-row" key={`${item.player_name}-${index}`}>
-                <span>{swingPointsText(item.net_swing_points, 1)}</span>
+                <span>{swingPointsText(item.impact_score_points, 1)}</span>
                 <strong>{item.player_name}</strong>
-                <em>{`${item.goals || 0} G, ${item.touches || 0} touches, ${item.positive_swings || 0}/${item.negative_swings || 0} swings, ${swingPointsText(item.advantage_per_touch_points, 1)} per touch`}</em>
+                <em>{playerImpactDetailText(item)}</em>
               </div>
             ))}
           </div>
@@ -3897,6 +3952,12 @@ function getInitialTab() {
   return normalizeTabId(window.location.hash) || 'overview';
 }
 
+function getInitialReplayId() {
+  if (typeof window === 'undefined') return '';
+  const query = new URLSearchParams(window.location.search);
+  return query.get('replayId') || '';
+}
+
 
 function isNativeViewerRoute() {
   if (typeof window === 'undefined') return false;
@@ -4119,7 +4180,7 @@ function App() {
   const [playerRecordProfileState, setPlayerRecordProfileState] = useState(null);
   const [teamHeadToHead, setTeamHeadToHead] = useState(null);
   const [playerHeadToHead, setPlayerHeadToHead] = useState(null);
-  const [selectedReplayId, setSelectedReplayId] = useState('');
+  const [selectedReplayId, setSelectedReplayId] = useState(getInitialReplayId);
   const [selectedTeam, setSelectedTeam] = useState('');
   const [selectedPlayer, setSelectedPlayer] = useState('');
   const [selectedTeamLeft, setSelectedTeamLeft] = useState('');

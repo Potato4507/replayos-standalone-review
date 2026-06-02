@@ -1443,7 +1443,7 @@ def homepage_html() -> str:
         ['Swing count', fmtNumber(evalData.swing_count, 0), evalData.largest_swing ? `${fmtSwingPoints(evalData.largest_swing.swing_points)} at ${fmtNumber(evalData.largest_swing.t, 1)}s` : 'No swing registered'],
         ['Largest blunder', (evalData.blunders || [])[0]?.player_name || 'None yet', (evalData.blunders || [])[0] ? `${fmtSwingPoints(evalData.blunders[0].swing_points)} at ${fmtNumber(evalData.blunders[0].t, 1)}s` : 'No major blunder flagged'],
         ['Clutch play', (evalData.clutch_plays || [])[0]?.player_name || 'None yet', (evalData.clutch_plays || [])[0] ? `${fmtSwingPoints(evalData.clutch_plays[0].swing_points)} at ${fmtNumber(evalData.clutch_plays[0].t, 1)}s` : 'No late-game dagger flagged'],
-        ['Impact leader', impact[0]?.player_name || 'None yet', impact[0] ? `${impact[0].goals || 0} G, ${impact[0].positive_swings || 0} positive swings, ${fmtSwingPoints(impact[0].net_swing_points)} net` : 'Waiting for impact breakdown'],
+        ['Impact leader', impact[0]?.player_name || 'None yet', impact[0] ? `${fmtSwingPoints(impact[0].impact_score_points)} impact, ${fmtNumber(impact[0].created_advantage_points, 1)} created, ${fmtNumber(impact[0].lost_advantage_points, 1)} lost` : 'Waiting for impact breakdown'],
         ['Scoreline', `${replay.blue_team_name || 'Blue'} ${replay.blue_goals ?? 0} - ${replay.orange_goals ?? 0} ${replay.orange_team_name || 'Orange'}`, replay.map_code || 'Map pending'],
       ];
       return cards.map(([label, value, note]) => `<article class="summary-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><em class="meta">${escapeHtml(note)}</em></article>`).join('');
@@ -1501,6 +1501,18 @@ def homepage_html() -> str:
       return rows.map((row) => formatter(row)).join('');
     }
 
+    function playerImpactDetail(row) {
+      return `${row.goals || 0} G, ${row.touches || 0} touches, ${fmtNumber(row.created_advantage_points, 1)} created, ${fmtNumber(row.lost_advantage_points, 1)} lost, ${fmtSwingPoints(row.net_swing_points)} net, ${fmtSwingPoints(row.advantage_per_touch_points)} per touch`;
+    }
+
+    function nativeViewerUrl(rawUrl, embed) {
+      const url = new URL(rawUrl || '/native-viewer/index.html', window.location.origin);
+      url.searchParams.set('apiBase', window.location.origin);
+      if (embed) url.searchParams.set('embed', '1');
+      else url.searchParams.delete('embed');
+      return `${url.pathname}${url.search}`;
+    }
+
     function fillBoxscores(players, blueName, orangeName) {
       const blue = [];
       const orange = [];
@@ -1544,8 +1556,8 @@ def homepage_html() -> str:
       document.getElementById('viewer-title').textContent = replay.title || payload.replay_id;
       document.getElementById('viewer-meta').textContent = `${replay.blue_team_name || 'Blue'} vs ${replay.orange_team_name || 'Orange'} | ${replay.map_code || 'Map pending'} | 60 Hz native viewer`;
       const nativeFrame = document.getElementById('native-frame');
-      const embedUrl = `${payload.native_viewer_url}${encodeURIComponent(window.location.origin)}`;
-      const fullUrl = `${(payload.native_full_viewer_url || payload.native_viewer_url.replace('&embed=1', ''))}${encodeURIComponent(window.location.origin)}`;
+      const embedUrl = nativeViewerUrl(payload.native_viewer_url, true);
+      const fullUrl = nativeViewerUrl(payload.native_full_viewer_url || payload.native_viewer_url, false);
       startNativeFrameAutoSize();
       nativeFrame.src = embedUrl;
       document.getElementById('open-native').href = fullUrl;
@@ -1555,7 +1567,7 @@ def homepage_html() -> str:
       document.getElementById('blunders').innerHTML = stackRows((evalData.blunders || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtNumber(row.t, 1)}s</span><div><strong>${escapeHtml(row.label || 'Blunder')}</strong><em class="meta">${escapeHtml(fmtSwingPoints(row.swing_points))}</em></div></div>`);
       document.getElementById('plays').innerHTML = stackRows((evalData.plays || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtNumber(row.t, 1)}s</span><div><strong>${escapeHtml(row.label || 'Play')}</strong><em class="meta">${escapeHtml(fmtSwingPoints(row.swing_points))}</em></div></div>`);
       document.getElementById('clutch-plays').innerHTML = stackRows((evalData.clutch_plays || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtNumber(row.t, 1)}s</span><div><strong>${escapeHtml(row.label || 'Clutch play')}</strong><em class="meta">${escapeHtml(fmtSwingPoints(row.swing_points))}</em></div></div>`);
-      document.getElementById('player-impact').innerHTML = stackRows((viewer.player_impact || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtSwingPoints(row.net_swing_points)}</span><div><strong>${escapeHtml(row.player_name || 'Player')}</strong><em class="meta">${row.goals || 0} G, ${row.touches || 0} touches, ${row.positive_swings || 0}/${row.negative_swings || 0} swings, ${fmtSwingPoints(row.advantage_per_touch_points)} per touch</em></div></div>`);
+      document.getElementById('player-impact').innerHTML = stackRows((viewer.player_impact || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtSwingPoints(row.impact_score_points)}</span><div><strong>${escapeHtml(row.player_name || 'Player')}</strong><em class="meta">${escapeHtml(playerImpactDetail(row))}</em></div></div>`);
       document.getElementById('model-reasons').innerHTML = stackRows((prediction.reasons || []).slice(0, 8), (row) => `<div class="stack-row"><span>${escapeHtml(row.feature || row.name || 'Reason')}</span><div><strong>${escapeHtml(fmtNumber(row.contribution ?? row.value_z ?? 0, 3))}</strong><em class="meta">${escapeHtml(fmtNumber(row.value_z ?? row.value ?? 0, 3))}</em></div></div>`);
       fillBoxscores(replay.players || [], replay.blue_team_name, replay.orange_team_name);
       renderLibrarySelection();

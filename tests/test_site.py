@@ -165,6 +165,10 @@ class SiteTests(unittest.TestCase):
         self.assertTrue(replay_eval["plays"])
         self.assertGreater(replay_eval["volatility_points"], 0.0)
         self.assertEqual(replay_eval["swing_count"], 2)
+        player_rows = {row["player_name"]: row for row in replay_eval["player_net"]}
+        self.assertGreater(player_rows["Zez0nix"]["created_advantage_points"], 0.0)
+        self.assertGreater(player_rows["CJCJ"]["lost_advantage_points"], 0.0)
+        self.assertGreater(player_rows["Zez0nix"]["involvement_points"], 0.0)
 
     def test_replay_review_cache_precomputes_and_attaches_to_library_rows(self) -> None:
         con = duckdb.connect(":memory:")
@@ -260,6 +264,7 @@ class SiteTests(unittest.TestCase):
 
             rows = list_library_replays(con, limit=5)
             self.assertEqual(rows[0]["review"]["largest_blunder"]["player_name"], "Alpha")
+            self.assertIn("impact_score_points", rows[0]["review"]["impact_leader"])
             self.assertGreater(rows[0]["review"]["volatility"], 0.0)
             self.assertGreaterEqual(rows[0]["review"]["swing_count"], 2)
             filtered = list_library_replays(con, limit=5, search="Alpha", parsed_only=True, review_ready=True)
