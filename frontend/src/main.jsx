@@ -3449,32 +3449,16 @@ function Viewer({ viewer, loading = false, selectedReplayCard = null, onRefreshR
     if (!nativeViewerReady || !nativeViewerSrc) return undefined;
     const frame = nativeFrameRef.current;
     if (!frame) return undefined;
-    let timer = null;
     const syncHeight = () => {
-      try {
-        const doc = frame.contentDocument;
-        if (!doc) return;
-        const nextHeight = Math.max(
-          doc.documentElement?.scrollHeight || 0,
-          doc.body?.scrollHeight || 0,
-          780,
-        );
-        const resolved = Math.min(nextHeight + 16, 1700);
-        setNativeFrameHeight((current) => (Math.abs(current - resolved) > 8 ? resolved : current));
-      } catch {
-        // iframe can briefly be unavailable while the native viewer is loading
-      }
+      const resolved = Math.round(Math.min(Math.max(window.innerHeight * 0.86, 760), 1080));
+      setNativeFrameHeight((current) => (Math.abs(current - resolved) > 8 ? resolved : current));
     };
-    const onLoad = () => {
-      syncHeight();
-      if (timer) window.clearInterval(timer);
-      timer = window.setInterval(syncHeight, 900);
-    };
-    frame.addEventListener('load', onLoad);
-    onLoad();
+    frame.addEventListener('load', syncHeight);
+    window.addEventListener('resize', syncHeight);
+    syncHeight();
     return () => {
-      frame.removeEventListener('load', onLoad);
-      if (timer) window.clearInterval(timer);
+      frame.removeEventListener('load', syncHeight);
+      window.removeEventListener('resize', syncHeight);
     };
   }, [nativeViewerReady, nativeViewerSrc, replay?.replay_id]);
 

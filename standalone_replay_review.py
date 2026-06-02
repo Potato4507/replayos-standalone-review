@@ -1454,35 +1454,27 @@ def homepage_html() -> str:
         clearInterval(state.nativeFrameTimer);
         state.nativeFrameTimer = null;
       }
+      if (state.nativeFrameResizeHandler) {
+        window.removeEventListener('resize', state.nativeFrameResizeHandler);
+        state.nativeFrameResizeHandler = null;
+      }
     }
 
     function syncNativeFrameHeight() {
       const frame = document.getElementById('native-frame');
       if (!frame) return;
-      try {
-        const doc = frame.contentDocument;
-        if (!doc) return;
-        const nextHeight = Math.max(
-          doc.documentElement?.scrollHeight || 0,
-          doc.body?.scrollHeight || 0,
-          780,
-        );
-        frame.style.height = `${Math.min(nextHeight + 16, 1700)}px`;
-      } catch (error) {
-        // same-origin viewer height sync can fail briefly while the iframe is loading
-      }
+      const nextHeight = Math.round(Math.min(Math.max(window.innerHeight * 0.86, 760), 1080));
+      frame.style.height = `${nextHeight}px`;
     }
 
     function startNativeFrameAutoSize() {
       const frame = document.getElementById('native-frame');
       if (!frame) return;
       stopNativeFrameAutoSize();
-      const onLoad = () => {
-        syncNativeFrameHeight();
-        stopNativeFrameAutoSize();
-        state.nativeFrameTimer = setInterval(syncNativeFrameHeight, 900);
-      };
-      frame.onload = onLoad;
+      state.nativeFrameResizeHandler = syncNativeFrameHeight;
+      window.addEventListener('resize', state.nativeFrameResizeHandler);
+      frame.onload = syncNativeFrameHeight;
+      syncNativeFrameHeight();
     }
 
     function buildEdgeBar(edge) {

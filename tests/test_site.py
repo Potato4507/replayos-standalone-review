@@ -170,6 +170,21 @@ class SiteTests(unittest.TestCase):
         self.assertGreater(player_rows["CJCJ"]["lost_advantage_points"], 0.0)
         self.assertGreater(player_rows["Zez0nix"]["involvement_points"], 0.0)
 
+    def test_build_replay_eval_ignores_kickoff_and_loose_turnover_noise(self) -> None:
+        events = [
+            {"event_id": 1, "t": 5.9, "event_type": "touch", "team_color": "orange", "player_name": "Joyo", "value": 1.0, "meta": '{"is_kickoff":true}'},
+            {"event_id": 2, "t": 5.9, "event_type": "kickoff_outcome", "team_color": "orange", "player_name": "Joyo", "value": 1.0},
+            {"event_id": 3, "t": 5.9, "event_type": "turnover", "team_color": "blue", "player_name": "Vatira", "other_team_color": "orange", "other_player_name": "Joyo", "value": 1.0, "meta": '{"gap_seconds":0.033}'},
+            {"event_id": 4, "t": 30.0, "event_type": "loose_ball_start", "value": 3.1, "meta": '{"gap_seconds":3.1}'},
+            {"event_id": 5, "t": 30.0, "event_type": "turnover", "team_color": "orange", "player_name": "Archie", "other_team_color": "blue", "other_player_name": "Vatira", "value": 1.0, "meta": '{"gap_seconds":3.1}'},
+            {"event_id": 6, "t": 75.0, "event_type": "goal", "team_color": "blue", "player_name": "Vatira", "value": 1.0},
+        ]
+        replay_eval = build_replay_eval(events, [], duration=300.0)
+        edge = build_win_edge(events, 300.0, [])
+        self.assertFalse([row for row in replay_eval["blunders"] if row["event_type"] == "turnover"])
+        self.assertFalse([row for row in replay_eval["plays"] if row["event_type"] == "turnover"])
+        self.assertFalse([row for row in edge["highlights"] if row["event_type"] == "turnover"])
+
     def test_replay_review_cache_precomputes_and_attaches_to_library_rows(self) -> None:
         con = duckdb.connect(":memory:")
         try:

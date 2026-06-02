@@ -124,7 +124,7 @@ def build_turning_points(events: Iterable[dict[str, Any]]) -> list[dict[str, Any
     points: list[dict[str, Any]] = []
     for event in ordered:
         event_type = event.get("event_type")
-        if event_type not in {"goal", "demo", "boost_starvation_window", "loose_ball_start"}:
+        if event_type not in {"goal", "demo", "boost_starvation_window"}:
             continue
         t = float(event.get("t") or 0.0)
         points.append(
@@ -150,7 +150,7 @@ def _turning_point_label(event: dict[str, Any]) -> str:
         return f"{team or 'Unknown'} demo pressure"
     if event_type == "boost_starvation_window":
         return f"{team or 'Unknown'} boost starvation window"
-    return "Loose ball reset"
+    return "Replay event"
 
 
 def _turning_point_weight(event_type: str) -> float:
@@ -158,7 +158,6 @@ def _turning_point_weight(event_type: str) -> float:
         "goal": 1.0,
         "demo": 0.55,
         "boost_starvation_window": 0.45,
-        "loose_ball_start": 0.25,
     }
     return weights.get(event_type, 0.1)
 
@@ -192,4 +191,3 @@ def feature_reason_codes(feature_row: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         reasons.append({"name": name, "value": round(numeric, 4), "magnitude": abs(numeric)})
     return sorted(reasons, key=lambda item: item["magnitude"], reverse=True)[:5]
-

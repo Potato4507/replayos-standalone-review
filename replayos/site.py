@@ -17,7 +17,7 @@ from .semantics import build_replay_timeline
 from .youtube_sync import replay_videos as synced_replay_videos
 
 TEAM_ELO_CACHE_VERSION = "team-power-model-v6"
-REPLAY_REVIEW_CACHE_VERSION = "replay-review-v3"
+REPLAY_REVIEW_CACHE_VERSION = "replay-review-v5"
 _RANKING_NOISE_PATTERN = re.compile(r"^(team ?\d+|\d+%?|\d+ ?x ?\d+)$", re.IGNORECASE)
 
 
@@ -68,6 +68,66 @@ def _parse_json(value: str | None, fallback: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return fallback
+
+
+def _event_meta(event: dict[str, Any]) -> dict[str, Any]:
+    meta = event.get("meta")
+    if isinstance(meta, str):
+        return _parse_json(meta, {})
+    return meta if isinstance(meta, dict) else {}
+
+
+def _is_review_noise_turnover(
+    event: dict[str, Any],
+    *,
+    recent_kickoff_t: float | None,
+    recent_loose_t: float | None,
+    touch_meta: dict[str, Any] | None = None,
+) -> bool:
+    if event.get("event_type") != "turnover":
+        return False
+    t_value = float(event.get("t") or 0.0)
+    meta = _event_meta(event)
+    context_meta = touch_meta or {}
+    if recent_kickoff_t is not None and 0.0 <= t_value - recent_kickoff_t <= 2.0:
+        return True
+    if recent_loose_t is not None and 0.0 <= t_value - recent_loose_t <= 0.35:
+        return True
+    if "gap_seconds" not in meta:
+        return False
+    gap_seconds = float(meta.get("gap_seconds") or 0.0)
+    if gap_seconds <= 0.35 or gap_seconds >= 2.75:
+        return True
+    if "distance_to_goal" in context_meta or "distance_to_goal" in meta or "shot" in context_meta or "shot" in meta:
+        distance_to_goal = float(context_meta.get("distance_to_goal") or meta.get("distance_to_goal") or 0.0)
+        shot = bool(context_meta.get("shot") or meta.get("shot"))
+        return not shot and (distance_to_goal <= 0.0 or distance_to_goal > 2600.0)
+    return False
+
+
+def _filter_review_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = sorted(events, key=lambda row: (float(row.get("t") or 0.0), int(row.get("event_id") or 0)))
+    touch_context: dict[tuple[float, Any, Any], dict[str, Any]] = {
+        (round(float(event.get("t") or 0.0), 3), event.get("team_color"), event.get("player_name")): _event_meta(event)
+        for event in ordered
+        if event.get("event_type") == "touch"
+    }
+    filtered: list[dict[str, Any]] = []
+    recent_kickoff_t: float | None = None
+    recent_loose_t: float | None = None
+    for event in ordered:
+        t_value = float(event.get("t") or 0.0)
+        event_type = event.get("event_type")
+        meta = _event_meta(event)
+        if event_type == "kickoff_outcome" or (event_type == "touch" and bool(meta.get("is_kickoff"))):
+            recent_kickoff_t = t_value
+        if event_type == "loose_ball_start":
+            recent_loose_t = t_value
+        touch_meta = touch_context.get((round(t_value, 3), event.get("team_color"), event.get("player_name")))
+        if _is_review_noise_turnover(event, recent_kickoff_t=recent_kickoff_t, recent_loose_t=recent_loose_t, touch_meta=touch_meta):
+            continue
+        filtered.append(event)
+    return filtered
 
 
 def ballchasing_status(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
@@ -2279,7 +2339,7 @@ def build_win_edge(events: list[dict[str, Any]], duration: float, predictions: l
             base_probability = float(prediction["probability"])
             break
     base_score = math.log(base_probability / max(1e-6, 1.0 - base_probability))
-    ordered = sorted(events, key=lambda row: float(row.get("t") or 0.0))
+    ordered = _filter_review_events(events)
     cursor = 0
     score = base_score
     points: list[dict[str, Any]] = []
@@ -2405,7 +2465,7 @@ def _replay_eval_details(events: list[dict[str, Any]], predictions: list[dict[st
             base_probability = float(prediction["probability"])
             break
     score = math.log(base_probability / max(1e-6, 1.0 - base_probability))
-    ordered = sorted(events, key=lambda row: (float(row.get("t") or 0.0), int(row.get("event_id") or 0)))
+    ordered = _filter_review_events(events)
     ledger: list[dict[str, Any]] = []
     player_totals: dict[str, float] = {}
     player_probability_totals: dict[str, float] = {}

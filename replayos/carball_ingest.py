@@ -1410,7 +1410,8 @@ def _build_events(
             )
         else:
             gap = t_value - float(previous_touch["t"])
-            if gap >= 3.0:
+            loose_ball_recovery = gap >= 3.0
+            if loose_ball_recovery:
                 events.append(
                     _event(
                         replay_id,
@@ -1421,7 +1422,15 @@ def _build_events(
                         meta={"gap_seconds": round(gap, 3)},
                     )
                 )
-            if team_color and team_color != previous_touch.get("team_color"):
+            turnover_like = (
+                team_color
+                and team_color != previous_touch.get("team_color")
+                and not loose_ball_recovery
+                and gap > 0.35
+                and not bool(hit.get("is_kickoff"))
+                and not bool(previous_touch.get("is_kickoff"))
+            )
+            if turnover_like:
                 events.append(
                     _event(
                         replay_id,
@@ -1447,7 +1456,12 @@ def _build_events(
                         other_player_id=previous_touch.get("player_id"),
                         other_player_name=previous_touch.get("player_name"),
                         value=1.0,
-                        meta={"gap_seconds": round(gap, 3)},
+                        meta={
+                            "gap_seconds": round(gap, 3),
+                            "frame_number": frame_number,
+                            "distance_to_goal": float(hit.get("distance_to_goal") or 0.0),
+                            "shot": bool(hit.get("shot")),
+                        },
                     )
                 )
                 events.append(
@@ -1461,6 +1475,20 @@ def _build_events(
                         other_team_color=previous_touch.get("team_color"),
                         value=1.0,
                         meta={"reason": "touch_change"},
+                    )
+                )
+            elif loose_ball_recovery and team_color:
+                events.append(
+                    _event(
+                        replay_id,
+                        t_value,
+                        "possession_start",
+                        team_color=team_color,
+                        player_id=player.get("player_id"),
+                        player_name=player.get("player_name"),
+                        other_team_color=previous_touch.get("team_color"),
+                        value=1.0,
+                        meta={"reason": "loose_ball_recovery"},
                     )
                 )
 
@@ -1513,6 +1541,7 @@ def _build_events(
             "team_color": team_color,
             "player_id": player.get("player_id"),
             "player_name": player.get("player_name"),
+            "is_kickoff": bool(hit.get("is_kickoff")),
         }
 
     duration = float(metadata.get("length") or 0.0)
