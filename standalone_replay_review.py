@@ -245,6 +245,19 @@ def platform_counts(con: duckdb.DuckDBPyConnection) -> dict[str, int]:
     }
 
 
+def strip_video_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in {"videos", "video_links", "featured_video", "youtube_videos"}:
+                continue
+            cleaned[key] = strip_video_metadata(item)
+        return cleaned
+    if isinstance(value, list):
+        return [strip_video_metadata(item) for item in value]
+    return value
+
+
 def snapshot_sync_state() -> dict[str, Any]:
     with STATE_LOCK:
         return json.loads(json.dumps(SYNC_STATE))
@@ -377,6 +390,8 @@ def local_review_payload(
         replay = get_library_replay(con, replay_id)
         if viewer is None or replay is None:
             raise ReviewPlatformError("Replay review is unavailable in the local review platform.")
+        viewer = strip_video_metadata(viewer)
+        replay = strip_video_metadata(replay)
         counts = platform_counts(con)
 
     return {
@@ -402,7 +417,7 @@ def library_page_payload(
     sort: str,
 ) -> dict[str, Any]:
     with workspace_connection(read_only=False) as (_, _, con):
-        return library_replay_page(
+        payload = library_replay_page(
             con,
             limit=limit,
             offset=offset,
@@ -411,6 +426,7 @@ def library_page_payload(
             review_ready=review_ready,
             sort_mode=sort,
         )
+    return strip_video_metadata(payload)
 
 
 def run_source_sync(*, trigger: str, count: int | None = None, force_download: bool = False) -> dict[str, Any]:
@@ -808,9 +824,9 @@ def homepage_html() -> str:
     <section class="hero">
       <div>
         <p class="kicker">Review-Only ReplayOS</p>
-        <h1>Run the review platform without the rest of the site.</h1>
+        <h1>Run the simplified replay review app.</h1>
       </div>
-      <p>This is the replay-review branch of ReplayOS: save a Ballchasing API token, sync from creator or group sources, add single replays, and work from a replay shelf into the full review viewer.</p>
+      <p>This keeps the ReplayOS review core: replay semantics, team recognition, player naming, series grouping, and the native 60 Hz viewer. It leaves out the bigger site modules like records, live coverage, and broader pro-data pages.</p>
       <div id="state-strip" class="state-strip"></div>
     </section>
 

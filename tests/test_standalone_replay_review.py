@@ -1,6 +1,6 @@
 import unittest
 
-from standalone_replay_review import normalize_replay_id, parse_source_inputs
+from standalone_replay_review import normalize_replay_id, parse_source_inputs, strip_video_metadata
 
 
 class StandaloneReplayReviewTests(unittest.TestCase):
@@ -37,6 +37,24 @@ class StandaloneReplayReviewTests(unittest.TestCase):
         self.assertEqual(parsed["groups"], [])
         self.assertEqual(parsed["creators"], [])
         self.assertEqual(parsed["invalid"], ["https://example.com/not-ballchasing"])
+
+    def test_strip_video_metadata_removes_video_keys(self) -> None:
+        payload = {
+            "replay": {
+                "title": "Example",
+                "videos": [{"watch_url": "https://youtube.com/watch?v=1"}],
+            },
+            "viewer": {
+                "featured_video": {"video_id": "abc"},
+                "timeline": [{"t": 1.0}],
+            },
+            "youtube_videos": 8,
+        }
+        cleaned = strip_video_metadata(payload)
+        self.assertEqual(cleaned["replay"]["title"], "Example")
+        self.assertNotIn("videos", cleaned["replay"])
+        self.assertNotIn("featured_video", cleaned["viewer"])
+        self.assertNotIn("youtube_videos", cleaned)
 
 
 if __name__ == "__main__":
