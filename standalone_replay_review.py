@@ -577,15 +577,50 @@ def homepage_html() -> str:
       font-size: 1.45rem;
       line-height: 1;
     }
-    .app-grid {
+    .workspace-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .workspace-tab {
+      appearance: none;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 800;
+      padding: 10px 14px;
+    }
+    .workspace-tab.active {
+      background: rgba(32, 179, 170, 0.12);
+      border-color: rgba(32, 179, 170, 0.6);
+      box-shadow: 0 0 0 1px rgba(32, 179, 170, 0.18) inset;
+      color: var(--text);
+    }
+    .workspace-panels,
+    .tab-panel,
+    .content {
       display: grid;
       gap: 18px;
-      grid-template-columns: 360px minmax(0, 1fr);
+    }
+    .tab-panel {
+      display: none;
+    }
+    .tab-panel.active {
+      display: grid;
+    }
+    .panel-grid {
+      display: grid;
+      gap: 18px;
       align-items: start;
     }
-    .sidebar, .content {
-      display: grid;
-      gap: 18px;
+    .library-layout {
+      grid-template-columns: minmax(0, 1.1fr) minmax(20rem, 0.9fr);
+    }
+    .utility-layout {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .panel-head {
       display: flex;
@@ -808,12 +843,25 @@ def homepage_html() -> str:
       text-align: center;
       padding: 24px;
     }
+    .workspace-note {
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .workspace-note strong {
+      color: var(--text);
+    }
+    .preview-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
     @media (max-width: 1280px) {
       .summary-grid, .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .state-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
     @media (max-width: 980px) {
-      .app-grid, .summary-grid, .detail-grid, .boxscores, .inline-grid, .state-strip { grid-template-columns: 1fr; }
+      .panel-grid, .summary-grid, .detail-grid, .boxscores, .inline-grid, .state-strip { grid-template-columns: 1fr; }
       iframe { min-height: 560px; }
       .library-list { max-height: none; }
     }
@@ -830,125 +878,73 @@ def homepage_html() -> str:
       <div id="state-strip" class="state-strip"></div>
     </section>
 
-    <div class="app-grid">
-      <aside class="sidebar">
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="kicker">Ballchasing</p>
-              <h2>Source settings</h2>
-            </div>
-          </div>
-          <form id="config-form">
-            <label>
-              Save Ballchasing API token
-              <input id="config-token" type="password" placeholder="Leave blank to keep the saved token">
-            </label>
-            <label class="check">
-              <input id="config-clear-token" type="checkbox">
-              Clear saved token
-            </label>
-            <label>
-              Group sources
-              <textarea id="config-groups" placeholder="One Ballchasing group id or URL per line"></textarea>
-            </label>
-            <label>
-              Creator sources
-              <textarea id="config-creators" placeholder="One Ballchasing creator id or URL per line"></textarea>
-            </label>
-            <div class="inline-grid">
-              <label>
-                Sync count
-                <input id="config-sync-count" type="number" min="1" max="200" value="8">
-              </label>
-              <label>
-                Creator group limit
-                <input id="config-creator-limit" type="number" min="1" max="200" value="12">
-              </label>
-            </div>
-            <div class="inline-grid">
-              <label class="check">
-                <input id="config-auto-sync" type="checkbox">
-                Auto-sync configured sources
-              </label>
-              <label>
-                Auto-sync minutes
-                <input id="config-auto-minutes" type="number" min="5" max="1440" value="30">
-              </label>
-            </div>
-            <div class="actions">
-              <button type="submit">Save settings</button>
-              <button id="sync-now" type="button" class="secondary">Sync sources now</button>
-            </div>
-          </form>
-          <div id="config-status" class="status-line">Load the local review workspace, then save your sources.</div>
-        </section>
+    <nav class="workspace-tabs" role="tablist" aria-label="Replay review workspace">
+      <button id="tab-button-library" class="workspace-tab active" type="button" role="tab" aria-selected="true" aria-controls="tab-panel-library" data-tab="library">Replay Shelf</button>
+      <button id="tab-button-review" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="tab-panel-review" data-tab="review">Review Workspace</button>
+      <button id="tab-button-import" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="tab-panel-import" data-tab="import">Add Replay</button>
+      <button id="tab-button-sources" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="tab-panel-sources" data-tab="sources">Sources</button>
+    </nav>
 
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="kicker">Import</p>
-              <h2>Add one replay</h2>
+    <div class="workspace-panels">
+      <section id="tab-panel-library" class="tab-panel active" role="tabpanel" aria-labelledby="tab-button-library">
+        <div class="panel-grid library-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="kicker">Replay shelf</p>
+                <h2>Library</h2>
+              </div>
             </div>
-          </div>
-          <form id="import-form">
-            <label>
-              Ballchasing replay URL or replay id
-              <input id="import-replay" type="text" placeholder="https://ballchasing.com/replay/...">
-            </label>
-            <label class="check">
-              <input id="import-force" type="checkbox">
-              Force re-download and re-parse
-            </label>
-            <div class="actions">
-              <button type="submit">Add replay</button>
+            <div class="stack">
+              <label>
+                Search
+                <input id="library-search" type="text" placeholder="Team, player, replay id">
+              </label>
+              <div class="inline-grid">
+                <label class="check">
+                  <input id="library-parsed-only" type="checkbox">
+                  Parsed only
+                </label>
+                <label class="check">
+                  <input id="library-review-ready" type="checkbox">
+                  Review ready
+                </label>
+              </div>
+              <div class="filter-row">
+                <label style="min-width: 11rem;">
+                  Sort
+                  <select id="library-sort">
+                    <option value="recent">Recent</option>
+                    <option value="series">Series</option>
+                  </select>
+                </label>
+                <button id="library-refresh" type="button" class="secondary">Refresh</button>
+              </div>
             </div>
-          </form>
-          <div id="import-status" class="status-line">Single replay imports use the saved token unless you clear it.</div>
-        </section>
+            <div id="library-status" class="status-line">Loading library...</div>
+            <div id="library-list" class="library-list"></div>
+            <div class="library-footer">
+              <button id="library-load-more" type="button" class="secondary" style="display:none;">Load more</button>
+            </div>
+          </section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="kicker">Replay shelf</p>
-              <h2>Library</h2>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="kicker">Current pick</p>
+                <h2>Selected replay</h2>
+              </div>
             </div>
-          </div>
-          <div class="stack">
-            <label>
-              Search
-              <input id="library-search" type="text" placeholder="Team, player, replay id">
-            </label>
-            <div class="inline-grid">
-              <label class="check">
-                <input id="library-parsed-only" type="checkbox">
-                Parsed only
-              </label>
-              <label class="check">
-                <input id="library-review-ready" type="checkbox">
-                Review ready
-              </label>
+            <div id="library-preview" class="stack"></div>
+            <div class="preview-actions">
+              <button id="open-selected-review" type="button" disabled>Open review workspace</button>
             </div>
-            <div class="filter-row">
-              <label style="min-width: 11rem;">
-                Sort
-                <select id="library-sort">
-                  <option value="recent">Recent</option>
-                  <option value="series">Series</option>
-                </select>
-              </label>
-              <button id="library-refresh" type="button" class="secondary">Refresh</button>
-            </div>
-          </div>
-          <div id="library-status" class="status-line">Loading library...</div>
-          <div id="library-list" class="library-list"></div>
-          <div class="library-footer">
-            <button id="library-load-more" type="button" class="secondary" style="display:none;">Load more</button>
-          </div>
-        </section>
-      </aside>
+            <p class="workspace-note">Keep the shelf here, select a replay, then jump into the review workspace when you want the full 60 Hz viewer, semantics, swing tracking, and player impact breakdown.</p>
+          </section>
+        </div>
+      </section>
 
-      <section class="content">
+      <section id="tab-panel-review" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-review">
         <section id="review-shell" class="review-shell">
           <div id="viewer-empty" class="panel empty-state">
             <div class="empty-copy">
@@ -1033,17 +1029,142 @@ def homepage_html() -> str:
           </div>
         </section>
       </section>
+
+      <section id="tab-panel-import" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-import">
+        <div class="panel-grid utility-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="kicker">Import</p>
+                <h2>Add one replay</h2>
+              </div>
+            </div>
+            <form id="import-form">
+              <label>
+                Ballchasing replay URL or replay id
+                <input id="import-replay" type="text" placeholder="https://ballchasing.com/replay/...">
+              </label>
+              <label class="check">
+                <input id="import-force" type="checkbox">
+                Force re-download and re-parse
+              </label>
+              <div class="actions">
+                <button type="submit">Add replay</button>
+              </div>
+            </form>
+            <div id="import-status" class="status-line">Single replay imports use the saved token unless you clear it.</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="kicker">Review flow</p>
+                <h2>Bring replays into the shelf</h2>
+              </div>
+            </div>
+            <div class="stack">
+              <p class="workspace-note"><strong>Paste a Ballchasing replay id or URL here</strong> when you want one replay reviewed right away.</p>
+              <p class="workspace-note">The app downloads the replay, parses local 60 Hz telemetry, keeps it in your shelf, and opens the review workspace with team naming, player naming, turning points, and player impact.</p>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-panel-sources" class="tab-panel" role="tabpanel" aria-labelledby="tab-button-sources">
+        <div class="panel-grid utility-layout">
+          <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">Ballchasing</p>
+              <h2>Source settings</h2>
+            </div>
+          </div>
+          <form id="config-form">
+            <label>
+              Save Ballchasing API token
+              <input id="config-token" type="password" placeholder="Leave blank to keep the saved token">
+            </label>
+            <label class="check">
+              <input id="config-clear-token" type="checkbox">
+              Clear saved token
+            </label>
+            <label>
+              Group sources
+              <textarea id="config-groups" placeholder="One Ballchasing group id or URL per line"></textarea>
+            </label>
+            <label>
+              Creator sources
+              <textarea id="config-creators" placeholder="One Ballchasing creator id or URL per line"></textarea>
+            </label>
+            <div class="inline-grid">
+              <label>
+                Sync count
+                <input id="config-sync-count" type="number" min="1" max="200" value="8">
+              </label>
+              <label>
+                Creator group limit
+                <input id="config-creator-limit" type="number" min="1" max="200" value="12">
+              </label>
+            </div>
+            <div class="inline-grid">
+              <label class="check">
+                <input id="config-auto-sync" type="checkbox">
+                Auto-sync configured sources
+              </label>
+              <label>
+                Auto-sync minutes
+                <input id="config-auto-minutes" type="number" min="5" max="1440" value="30">
+              </label>
+            </div>
+            <div class="actions">
+              <button type="submit">Save settings</button>
+              <button id="sync-now" type="button" class="secondary">Sync sources now</button>
+            </div>
+          </form>
+          <div id="config-status" class="status-line">Load the local review workspace, then save your sources.</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="kicker">Source sync</p>
+                <h2>Keep the shelf warm</h2>
+              </div>
+            </div>
+            <div class="stack">
+              <p class="workspace-note"><strong>Use groups and creator feeds</strong> when you want this review workspace to stay stocked with your own matches or a team library.</p>
+              <p class="workspace-note">Auto-sync checks the saved sources, downloads new replays, parses them locally, and makes them available on the replay shelf without needing the broader live or pro-site stack.</p>
+            </div>
+          </section>
+        </div>
+      </section>
     </div>
   </main>
 
   <script>
     const state = {
+      activeTab: 'library',
       configHydrated: false,
       selectedReplayId: null,
+      selectedReplayCard: null,
+      currentReviewPayload: null,
       libraryOffset: 0,
       libraryLimit: 40,
       libraryHasMore: false,
+      libraryItems: [],
     };
+
+    function setActiveTab(tab) {
+      state.activeTab = tab;
+      document.querySelectorAll('.workspace-tab').forEach((button) => {
+        const active = button.getAttribute('data-tab') === tab;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      document.querySelectorAll('.tab-panel').forEach((panel) => {
+        panel.classList.toggle('active', panel.id === `tab-panel-${tab}`);
+      });
+    }
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -1161,9 +1282,80 @@ def homepage_html() -> str:
       `).join('');
     }
 
+    function renderLibrarySelection() {
+      document.querySelectorAll('.library-card').forEach((card) => {
+        card.classList.toggle('selected', card.getAttribute('data-replay-id') === String(state.selectedReplayId));
+      });
+    }
+
+    function renderLibraryPreview() {
+      const node = document.getElementById('library-preview');
+      const actionButton = document.getElementById('open-selected-review');
+      const reviewedReplay = state.currentReviewPayload?.replay_id === state.selectedReplayId
+        ? state.currentReviewPayload?.viewer?.replay
+        : null;
+      const replay = reviewedReplay || state.selectedReplayCard;
+      if (!replay) {
+        node.innerHTML = `
+          <div class="empty-copy">
+            <h3>No replay selected yet.</h3>
+            <p>Pick a replay from the shelf to keep it in focus here, then open the full review workspace when you want to study the match.</p>
+          </div>
+        `;
+        actionButton.disabled = true;
+        actionButton.textContent = 'Open review workspace';
+        return;
+      }
+      const review = replay.review || state.selectedReplayCard?.review || null;
+      const parsedStatus = String(replay.carball_status?.status || '').toLowerCase();
+      const parseLabel = parsedStatus === 'completed'
+        ? '60 Hz replay parse ready'
+        : parsedStatus === 'failed'
+          ? 'Parse failed'
+          : replay.has_semantic_features
+            ? 'Semantics ready'
+            : 'Parse pending';
+      const seriesName = replay.series_name || replay.series?.[0]?.group_name || 'No series tag yet';
+      node.innerHTML = `
+        <div class="stack-list">
+          <div class="stack-row">
+            <span>${escapeHtml(formatDate(replay.match_date || replay.ingested_at))}</span>
+            <div>
+              <strong>${escapeHtml(replay.title || `${replay.blue_team_name || 'Blue'} vs ${replay.orange_team_name || 'Orange'}`)}</strong>
+              <em class="meta">${escapeHtml(seriesName)}</em>
+            </div>
+          </div>
+          <div class="stack-row">
+            <span>${escapeHtml(parseLabel)}</span>
+            <div>
+              <strong>${escapeHtml(`${replay.blue_team_name || 'Blue'} ${replay.blue_goals ?? 0} - ${replay.orange_goals ?? 0} ${replay.orange_team_name || 'Orange'}`)}</strong>
+              <em class="meta">${escapeHtml(review ? `Vol ${fmtNumber(review.volatility, 2)} | ${review.swing_count || 0} swings` : 'Open the review workspace to build the full match breakdown.')}</em>
+            </div>
+          </div>
+          <div class="stack-row">
+            <span>${escapeHtml(replay.local_file_path ? 'Local replay saved' : 'Metadata only')}</span>
+            <div>
+              <strong>${escapeHtml(review ? reviewNote(review) : 'Ready to review when you are.')}</strong>
+              <em class="meta">${escapeHtml(replay.map_code || 'Map pending')}</em>
+            </div>
+          </div>
+        </div>
+      `;
+      actionButton.disabled = !state.selectedReplayId;
+      actionButton.textContent = state.currentReviewPayload?.replay_id === state.selectedReplayId
+        ? 'Open current review'
+        : 'Open review workspace';
+    }
+
     function renderLibrary(payload, append = false) {
       const listNode = document.getElementById('library-list');
       const items = payload.items || [];
+      if (append) {
+        const existing = new Set((state.libraryItems || []).map((item) => item.replay_id));
+        state.libraryItems = [...(state.libraryItems || []), ...items.filter((item) => !existing.has(item.replay_id))];
+      } else {
+        state.libraryItems = items.slice();
+      }
       const html = items.map((item) => {
         const selected = String(item.replay_id) === String(state.selectedReplayId);
         const review = item.review || null;
@@ -1200,12 +1392,27 @@ def homepage_html() -> str:
       state.libraryHasMore = Boolean(payload.has_more);
       document.getElementById('library-load-more').style.display = state.libraryHasMore ? 'inline-flex' : 'none';
       setStatus('library-status', `${payload.total || 0} replays in the local review shelf.`);
+      if (state.selectedReplayId) {
+        const selectedItem = (state.libraryItems || []).find((item) => String(item.replay_id) === String(state.selectedReplayId));
+        if (selectedItem) state.selectedReplayCard = selectedItem;
+      } else if ((state.libraryItems || []).length) {
+        state.selectedReplayId = state.libraryItems[0].replay_id;
+        state.selectedReplayCard = state.libraryItems[0];
+      } else if (!state.currentReviewPayload) {
+        state.selectedReplayCard = null;
+      }
       listNode.querySelectorAll('.library-card').forEach((card) => {
         card.addEventListener('click', () => {
           const replayId = card.getAttribute('data-replay-id');
-          if (replayId) selectReplay(replayId);
+          if (!replayId) return;
+          state.selectedReplayId = replayId;
+          state.selectedReplayCard = (state.libraryItems || []).find((item) => String(item.replay_id) === String(replayId)) || state.selectedReplayCard;
+          renderLibrarySelection();
+          renderLibraryPreview();
         });
       });
+      renderLibrarySelection();
+      renderLibraryPreview();
     }
 
     function buildSummary(viewer) {
@@ -1260,7 +1467,23 @@ def homepage_html() -> str:
       const replay = viewer.replay || {};
       const evalData = viewer.eval || {};
       const prediction = (viewer.predictions || [])[0] || {};
+      state.currentReviewPayload = payload;
       state.selectedReplayId = payload.replay_id;
+      state.selectedReplayCard = (state.libraryItems || []).find((item) => String(item.replay_id) === String(payload.replay_id)) || {
+        replay_id: payload.replay_id,
+        title: replay.title,
+        match_date: replay.match_date,
+        ingested_at: replay.ingested_at,
+        blue_team_name: replay.blue_team_name,
+        blue_goals: replay.blue_goals,
+        orange_team_name: replay.orange_team_name,
+        orange_goals: replay.orange_goals,
+        local_file_path: replay.local_file_path,
+        map_code: replay.map_code,
+        review: replay.review,
+        carball_status: replay.carball_status,
+        series: replay.series,
+      };
       document.getElementById('viewer-empty').style.display = 'none';
       document.getElementById('viewer-content').style.display = 'grid';
       document.getElementById('summary').innerHTML = buildSummary(viewer);
@@ -1278,9 +1501,9 @@ def homepage_html() -> str:
       document.getElementById('player-impact').innerHTML = stackRows((viewer.player_impact || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtNumber(row.net_impact, 3)}</span><div><strong>${escapeHtml(row.player_name || 'Player')}</strong><em class="meta">${row.goals || 0} G, ${row.touches || 0} touches, ${row.positive_swings || 0}/${row.negative_swings || 0} swings</em></div></div>`);
       document.getElementById('model-reasons').innerHTML = stackRows((prediction.reasons || []).slice(0, 8), (row) => `<div class="stack-row"><span>${escapeHtml(row.feature || row.name || 'Reason')}</span><div><strong>${escapeHtml(fmtNumber(row.contribution ?? row.value_z ?? 0, 3))}</strong><em class="meta">${escapeHtml(fmtNumber(row.value_z ?? row.value ?? 0, 3))}</em></div></div>`);
       fillBoxscores(replay.players || [], replay.blue_team_name, replay.orange_team_name);
-      document.querySelectorAll('.library-card').forEach((card) => {
-        card.classList.toggle('selected', card.getAttribute('data-replay-id') === String(state.selectedReplayId));
-      });
+      renderLibrarySelection();
+      renderLibraryPreview();
+      setActiveTab('review');
     }
 
     async function loadStatus() {
@@ -1314,9 +1537,6 @@ def homepage_html() -> str:
       const payload = await fetchJson(`/api/replays?${params.toString()}`);
       state.libraryOffset = (reset ? 0 : state.libraryOffset) + (payload.items || []).length;
       renderLibrary(payload, !reset);
-      if (reset && !state.selectedReplayId && payload.items?.length) {
-        await selectReplay(payload.items[0].replay_id);
-      }
     }
 
     async function selectReplay(replayId) {
@@ -1330,6 +1550,19 @@ def homepage_html() -> str:
         json_url: `/api/replays/${encodeURIComponent(replayId)}/viewer`,
       });
       setStatus('library-status', `Loaded ${replayId}.`);
+    }
+
+    async function openSelectedReview() {
+      if (!state.selectedReplayId) return;
+      if (state.currentReviewPayload?.replay_id === state.selectedReplayId) {
+        setActiveTab('review');
+        return;
+      }
+      try {
+        await selectReplay(state.selectedReplayId);
+      } catch (error) {
+        setStatus('library-status', error.message || 'Could not open replay review.', 'error');
+      }
     }
 
     async function saveSettings(event) {
@@ -1373,6 +1606,7 @@ def homepage_html() -> str:
         setStatus('config-status', `Sync complete. +${summary.inserted || 0} new, ${summary.downloaded || 0} downloaded, ${summary.parsed || 0} parsed.`);
         state.libraryOffset = 0;
         await Promise.all([loadStatus(), loadLibrary(true)]);
+        setActiveTab('library');
       } catch (error) {
         setStatus('config-status', error.message || 'Source sync failed.', 'error');
       }
@@ -1400,9 +1634,13 @@ def homepage_html() -> str:
       }
     }
 
+    document.querySelectorAll('.workspace-tab').forEach((button) => {
+      button.addEventListener('click', () => setActiveTab(button.getAttribute('data-tab') || 'library'));
+    });
     document.getElementById('config-form').addEventListener('submit', saveSettings);
     document.getElementById('sync-now').addEventListener('click', () => syncSources(false));
     document.getElementById('import-form').addEventListener('submit', importReplay);
+    document.getElementById('open-selected-review').addEventListener('click', openSelectedReview);
     document.getElementById('library-refresh').addEventListener('click', () => {
       state.libraryOffset = 0;
       loadLibrary(true).catch((error) => setStatus('library-status', error.message || 'Could not refresh library.', 'error'));
