@@ -179,6 +179,11 @@ function impactSwingText(item) {
   return signedNumber(item.impact, 3);
 }
 
+function playerImpactSummaryText(item) {
+  if (!item) return 'Waiting for player impact breakdown';
+  return `${item.goals || 0} G, ${item.positive_swings || 0} positive swings, ${swingPointsText(item.net_swing_points, 1)} net`;
+}
+
 function impactWindowText(item) {
   if (!item) return null;
   if (item.before_blue_probability === null || item.before_blue_probability === undefined) return null;
@@ -1397,34 +1402,47 @@ function LiveRadar({ live, liveStatus, onRefresh, onError }) {
 function WinEdgeBar({ edge }) {
   const segments = edge?.segments || [];
   const duration = Number(segments.length ? segments[segments.length - 1]?.end_t : 0);
+  const highlights = (edge?.highlights || []).slice(0, 8);
+  const lanes = [];
+  const laneGapPercent = 4.2;
+  const laidOutHighlights = highlights.map((highlight, index) => {
+    const rawLeft = duration > 0 ? (Number(highlight.t || 0) / duration) * 100 : 0;
+    const left = Math.max(0, Math.min(100, rawLeft));
+    let lane = lanes.findIndex((lastLeft) => left - lastLeft >= laneGapPercent);
+    if (lane === -1) {
+      lane = lanes.length;
+      lanes.push(left);
+    } else {
+      lanes[lane] = left;
+    }
+    return {
+      ...highlight,
+      _lane: lane,
+      _left: left,
+      _key: `${highlight.event_type}-${highlight.t}-${index}`,
+    };
+  });
+  const laneCount = Math.max(1, lanes.length);
   return (
     <div className="edge-wrap">
-      <div className="edge-bar" aria-label="Win edge timeline">
-        {segments.map((segment) => {
-          const intensity = Math.abs(segment.blue_edge) * 1.9 + 0.18;
-          const color = segment.blue_edge >= 0
-            ? `rgba(19, 168, 154, ${Math.min(1, intensity)})`
-            : `rgba(217, 86, 77, ${Math.min(1, intensity)})`;
-          return (
-            <span
-              key={segment.bucket}
-              className="edge-segment"
-              title={`${segment.end_t}s | Blue ${percent(segment.blue_probability)}`}
-              style={{ background: color }}
-            />
-          );
-        })}
+      <div
+        className="edge-bar"
+        aria-label="Win edge timeline"
+        style={{ '--edge-highlight-lanes': laneCount }}
+      >
         {duration > 0 ? (
-          <div className="edge-highlight-layer" aria-hidden="true">
-            {(edge?.highlights || []).slice(0, 8).map((highlight, index) => {
+          <div
+            className="edge-highlight-layer"
+            aria-hidden="true"
+          >
+            {laidOutHighlights.map((highlight) => {
               const marker = reviewMarkerMeta(highlight.event_type);
-              const left = Math.max(0, Math.min(100, (Number(highlight.t || 0) / duration) * 100));
               return (
                 <button
-                  key={`${highlight.event_type}-${highlight.t}-${index}`}
+                  key={highlight._key}
                   type="button"
                   className={`edge-highlight ${marker.tone}`}
-                  style={{ left: `${left}%` }}
+                  style={{ left: `${highlight._left}%`, top: `calc(${highlight._lane} * 1.7rem)` }}
                   title={`${marker.label} at ${number(highlight.t, 1)}s | Blue edge ${signedNumber(highlight.swing, 3)}`}
                 >
                   {marker.short}
@@ -1433,6 +1451,22 @@ function WinEdgeBar({ edge }) {
             })}
           </div>
         ) : null}
+        <div className="edge-segment-grid">
+          {segments.map((segment) => {
+            const intensity = Math.abs(segment.blue_edge) * 1.9 + 0.18;
+            const color = segment.blue_edge >= 0
+              ? `rgba(19, 168, 154, ${Math.min(1, intensity)})`
+              : `rgba(217, 86, 77, ${Math.min(1, intensity)})`;
+            return (
+              <span
+                key={segment.bucket}
+                className="edge-segment"
+                title={`${segment.end_t}s | Blue ${percent(segment.blue_probability)}`}
+                style={{ background: color }}
+              />
+            );
+          })}
+        </div>
       </div>
       <div className="edge-labels">
         <span>Orange edge</span>
@@ -3308,6 +3342,8 @@ function Viewer({ viewer, loading = false, selectedReplayCard = null, onRefreshR
   const playerImpact = viewer?.player_impact || [];
   const featuredVideo = replay?.videos?.[0];
   const [videoBusy, setVideoBusy] = useState(false);
+  const nativeFrameRef = useRef(null);
+  const [nativeFrameHeight, setNativeFrameHeight] = useState(780);
   const nativeStatus = String(replay?.carball_status?.status || '').toLowerCase();
   const nativeViewerReady = nativeStatus === 'completed';
   const grouped = useMemo(() => groupPlayers(replay?.players || []), [replay?.players]);
@@ -3371,6 +3407,39 @@ function Viewer({ viewer, loading = false, selectedReplayCard = null, onRefreshR
       ? 'This replay is still being parsed into 60 Hz native-viewer telemetry.'
       : 'This replay is still metadata-only for the native 3D viewer. Pick a replay with a completed local parse to watch it here.';
 
+  useEffect(() => {
+    if (!nativeViewerReady || !nativeViewerSrc) return undefined;
+    const frame = nativeFrameRef.current;
+    if (!frame) return undefined;
+    let timer = null;
+    const syncHeight = () => {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        const nextHeight = Math.max(
+          doc.documentElement?.scrollHeight || 0,
+          doc.body?.scrollHeight || 0,
+          780,
+        );
+        const resolved = Math.min(nextHeight + 16, 1700);
+        setNativeFrameHeight((current) => (Math.abs(current - resolved) > 8 ? resolved : current));
+      } catch {
+        // iframe can briefly be unavailable while the native viewer is loading
+      }
+    };
+    const onLoad = () => {
+      syncHeight();
+      if (timer) window.clearInterval(timer);
+      timer = window.setInterval(syncHeight, 900);
+    };
+    frame.addEventListener('load', onLoad);
+    onLoad();
+    return () => {
+      frame.removeEventListener('load', onLoad);
+      if (timer) window.clearInterval(timer);
+    };
+  }, [nativeViewerReady, nativeViewerSrc, replay?.replay_id]);
+
   return (
     <div className="viewer-shell">
       <div className="viewer-head">
@@ -3425,7 +3494,7 @@ function Viewer({ viewer, loading = false, selectedReplayCard = null, onRefreshR
         <div className="eval-card">
           <span>Volatility</span>
           <strong>{swingPointsText(replayEval?.volatility_points, 1)}</strong>
-          <em>{(replayEval?.plays?.length || 0) + (replayEval?.blunders?.length || 0)} major win-probability swings</em>
+          <em>{metricValue(replayEval?.swing_count)} major win-probability swings</em>
         </div>
         <div className="eval-card">
           <span>Swing count</span>
@@ -3445,7 +3514,7 @@ function Viewer({ viewer, loading = false, selectedReplayCard = null, onRefreshR
         <div className="eval-card">
           <span>Impact leader</span>
           <strong>{playerImpact?.[0]?.player_name || 'None yet'}</strong>
-          <em>{playerImpact?.[0] ? `${playerImpact[0].goals || 0} G, ${playerImpact[0].positive_swings || 0} positive swings, ${number(playerImpact[0].net_impact, 3)} edge score` : 'Waiting for player impact breakdown'}</em>
+          <em>{playerImpactSummaryText(playerImpact?.[0])}</em>
         </div>
       </div>
 
@@ -3464,8 +3533,10 @@ function Viewer({ viewer, loading = false, selectedReplayCard = null, onRefreshR
         {nativeViewerSrc && nativeViewerReady ? (
           <iframe
             key={replay.replay_id}
+            ref={nativeFrameRef}
             className="native-viewer-frame"
             src={nativeViewerSrc}
+            style={{ height: `${nativeFrameHeight}px` }}
             title={`${replay.title || replay.replay_id} native viewer`}
             allow="fullscreen; autoplay; clipboard-write"
           />
@@ -3595,9 +3666,9 @@ function Viewer({ viewer, loading = false, selectedReplayCard = null, onRefreshR
           <div className="stack-list">
             {playerImpact.slice(0, 8).map((item, index) => (
               <div className="stack-row" key={`${item.player_name}-${index}`}>
-                <span>{number(item.net_impact, 3)}</span>
+                <span>{swingPointsText(item.net_swing_points, 1)}</span>
                 <strong>{item.player_name}</strong>
-                <em>{`${item.goals || 0} G, ${item.touches || 0} touches, ${item.positive_swings || 0}/${item.negative_swings || 0} swings`}</em>
+                <em>{`${item.goals || 0} G, ${item.touches || 0} touches, ${item.positive_swings || 0}/${item.negative_swings || 0} swings, ${swingPointsText(item.advantage_per_touch_points, 1)} per touch`}</em>
               </div>
             ))}
           </div>

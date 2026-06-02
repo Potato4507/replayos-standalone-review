@@ -17,7 +17,7 @@ from .semantics import build_replay_timeline
 from .youtube_sync import replay_videos as synced_replay_videos
 
 TEAM_ELO_CACHE_VERSION = "team-power-model-v6"
-REPLAY_REVIEW_CACHE_VERSION = "replay-review-v1"
+REPLAY_REVIEW_CACHE_VERSION = "replay-review-v2"
 _RANKING_NOISE_PATTERN = re.compile(r"^(team ?\d+|\d+%?|\d+ ?x ?\d+)$", re.IGNORECASE)
 
 
@@ -1934,6 +1934,7 @@ def _decode_replay_review_row(row: dict[str, Any]) -> dict[str, Any]:
         "base_blue_probability": row.get("base_blue_probability"),
         "final_blue_probability": row.get("final_blue_probability"),
         "volatility": row.get("volatility"),
+        "volatility_points": eval_payload.get("volatility_points"),
         "swing_count": row.get("swing_count"),
         "largest_blunder": _summary_event_row(
             row.get("largest_blunder_player_name"),
@@ -1993,6 +1994,7 @@ def _build_replay_review_payload(
         "base_blue_probability": replay_eval.get("base_blue_probability"),
         "final_blue_probability": replay_eval.get("final_blue_probability"),
         "volatility": replay_eval.get("volatility"),
+        "volatility_points": replay_eval.get("volatility_points"),
         "swing_count": replay_eval.get("swing_count"),
         "largest_blunder": replay_eval.get("blunders", [None])[0] if replay_eval.get("blunders") else None,
         "best_play": replay_eval.get("plays", [None])[0] if replay_eval.get("plays") else None,
@@ -2022,23 +2024,36 @@ def _attach_replay_review_summaries(con: duckdb.DuckDBPyConnection, rows: list[d
 def _build_player_impact(events: list[dict[str, Any]], replay_eval: dict[str, Any], duration: float) -> list[dict[str, Any]]:
     ordered = sorted(events, key=lambda row: (float(row.get("t") or 0.0), int(row.get("event_id") or 0)))
     net_by_player = {
-        row["player_name"]: float(row["impact"])
+        row["player_name"]: {
+            "edge_score": float(row.get("impact") or 0.0),
+            "probability_swing": float(row.get("net_probability_swing") or 0.0),
+            "swing_points": float(row.get("net_swing_points") or 0.0),
+        }
         for row in replay_eval.get("player_net", [])
         if row.get("player_name")
     }
     counts: dict[str, dict[str, Any]] = {}
     clutch_cutoff = duration * 0.75 if duration else (ordered[-1].get("t") or 0.0) * 0.75 if ordered else 0.0
+    major_swing_threshold = 1.5
+    base_probability = float(replay_eval.get("base_blue_probability") or 0.5)
+    score = math.log(base_probability / max(1e-6, 1.0 - base_probability))
     for event in ordered:
         team_color = event.get("team_color")
         player_name = event.get("player_name")
         event_type = event.get("event_type")
         actor_name = player_name
         actor_team = team_color
-        actor_impact = _edge_delta(event)
+        delta = _edge_delta(event)
+        actor_edge = delta
+        before = 1.0 / (1.0 + math.exp(-max(min(score, 8.0), -8.0)))
+        score += delta
+        after = 1.0 / (1.0 + math.exp(-max(min(score, 8.0), -8.0)))
+        actor_probability_swing = (after - before) if team_color == "blue" else (before - after) if team_color == "orange" else 0.0
         if event_type == "turnover" and event.get("other_team_color"):
             actor_name = event.get("other_player_name") or event.get("other_player_id") or actor_name
             actor_team = event.get("other_team_color")
-            actor_impact = -abs(actor_impact)
+            actor_edge = -abs(delta)
+            actor_probability_swing = -abs(after - before)
         if actor_name:
             bucket = counts.setdefault(
                 actor_name,
@@ -2052,18 +2067,21 @@ def _build_player_impact(events: list[dict[str, Any]], replay_eval: dict[str, An
                     "turnovers_forced": 0,
                     "turnovers_committed": 0,
                     "clutch_impact": 0.0,
+                    "clutch_swing_points": 0.0,
                     "positive_swings": 0,
                     "negative_swings": 0,
                 },
             )
             bucket["team_color"] = bucket.get("team_color") or actor_team
-            if abs(actor_impact) >= 0.12:
-                if actor_impact >= 0:
+            swing_points = actor_probability_swing * 100.0
+            if abs(swing_points) >= major_swing_threshold:
+                if swing_points >= 0:
                     bucket["positive_swings"] += 1
                 else:
                     bucket["negative_swings"] += 1
             if float(event.get("t") or 0.0) >= clutch_cutoff:
-                bucket["clutch_impact"] += actor_impact
+                bucket["clutch_impact"] += actor_probability_swing
+                bucket["clutch_swing_points"] += swing_points
         if player_name:
             direct = counts.setdefault(
                 player_name,
@@ -2077,6 +2095,7 @@ def _build_player_impact(events: list[dict[str, Any]], replay_eval: dict[str, An
                     "turnovers_forced": 0,
                     "turnovers_committed": 0,
                     "clutch_impact": 0.0,
+                    "clutch_swing_points": 0.0,
                     "positive_swings": 0,
                     "negative_swings": 0,
                 },
@@ -2105,13 +2124,14 @@ def _build_player_impact(events: list[dict[str, Any]], replay_eval: dict[str, An
                     "turnovers_forced": 0,
                     "turnovers_committed": 0,
                     "clutch_impact": 0.0,
+                    "clutch_swing_points": 0.0,
                     "positive_swings": 0,
                     "negative_swings": 0,
                 },
             )
             committed["turnovers_committed"] += 1
     ordered_players = []
-    for player_name, impact in net_by_player.items():
+    for player_name, impact_row in net_by_player.items():
         bucket = counts.setdefault(
             player_name,
             {
@@ -2124,18 +2144,26 @@ def _build_player_impact(events: list[dict[str, Any]], replay_eval: dict[str, An
                 "turnovers_forced": 0,
                 "turnovers_committed": 0,
                 "clutch_impact": 0.0,
+                "clutch_swing_points": 0.0,
                 "positive_swings": 0,
                 "negative_swings": 0,
             },
         )
-        bucket["net_impact"] = round(float(impact), 4)
-        bucket["impact_per_touch"] = round(float(impact) / max(bucket["touches"], 1), 4)
+        raw_edge = float(impact_row.get("edge_score") or 0.0)
+        probability_swing = float(impact_row.get("probability_swing") or 0.0)
+        swing_points = float(impact_row.get("swing_points") or 0.0)
+        bucket["net_impact"] = round(raw_edge, 4)
+        bucket["net_probability_swing"] = round(probability_swing, 4)
+        bucket["net_swing_points"] = round(swing_points, 1)
+        bucket["impact_per_touch"] = round(raw_edge / max(bucket["touches"], 1), 4)
+        bucket["advantage_per_touch_points"] = round(swing_points / max(bucket["touches"], 1), 1)
         bucket["clutch_impact"] = round(float(bucket["clutch_impact"]), 4)
+        bucket["clutch_swing_points"] = round(float(bucket.get("clutch_swing_points") or 0.0), 1)
         ordered_players.append(bucket)
     ordered_players.sort(
         key=lambda item: (
-            float(item.get("net_impact") or 0.0),
-            float(item.get("clutch_impact") or 0.0),
+            float(item.get("net_swing_points") or 0.0),
+            float(item.get("clutch_swing_points") or 0.0),
             int(item.get("goals") or 0),
             -int(item.get("turnovers_committed") or 0),
         ),
@@ -2245,15 +2273,19 @@ def build_win_edge(events: list[dict[str, Any]], duration: float, predictions: l
         end_t = duration * (index + 1) / segments
         while cursor < len(ordered) and float(ordered[cursor].get("t") or 0.0) <= end_t:
             event = ordered[cursor]
+            before = 1.0 / (1.0 + math.exp(-max(min(score, 8.0), -8.0)))
             delta = _edge_delta(event)
             score += delta
-            if abs(delta) >= 0.45:
+            after = 1.0 / (1.0 + math.exp(-max(min(score, 8.0), -8.0)))
+            probability_swing = after - before
+            if abs(probability_swing) >= 0.025 or (event.get("event_type") in {"goal", "turnover", "pressure_phase", "demo"} and abs(probability_swing) >= 0.012):
                 highlights.append(
                     {
                         "t": round(float(event.get("t") or 0.0), 1),
                         "event_type": event.get("event_type"),
                         "team_color": event.get("team_color"),
-                        "swing": round(delta, 3),
+                        "swing": round(probability_swing, 4),
+                        "swing_points": round(probability_swing * 100.0, 1),
                     }
                 )
             cursor += 1
@@ -2280,44 +2312,59 @@ def build_replay_eval(
     ordered = details["ordered"]
     ledger = details["ledger"]
     player_totals = details["player_totals"]
+    player_probability_totals = details["player_probability_totals"]
     team_totals = details["team_totals"]
     score = details["score"]
     base_probability = details["base_probability"]
     effective_duration = float(duration or (ordered[-1].get("t") if ordered else 0.0) or 0.0)
     clutch_cutoff = effective_duration * 0.75 if effective_duration else 0.0
+    edge = build_win_edge(events, effective_duration or 1.0, predictions)
+    segment_probabilities = [base_probability, *[float(segment.get("blue_probability") or 0.0) for segment in edge.get("segments", [])]]
+    volatility_points = round(
+        sum(abs(segment_probabilities[index] - segment_probabilities[index - 1]) for index in range(1, len(segment_probabilities))) * 100.0,
+        1,
+    )
+    minor_swing_threshold = 1.5
+    major_swing_threshold = 3.0
     blunders = sorted(
-        [row for row in ledger if row["impact"] <= -0.12],
-        key=lambda item: item["impact"],
+        [row for row in ledger if float(row.get("swing_points") or 0.0) <= -minor_swing_threshold],
+        key=lambda item: float(item.get("swing_points") or 0.0),
     )[:8]
     plays = sorted(
-        [row for row in ledger if row["impact"] >= 0.12],
-        key=lambda item: item["impact"],
+        [row for row in ledger if float(row.get("swing_points") or 0.0) >= minor_swing_threshold],
+        key=lambda item: float(item.get("swing_points") or 0.0),
         reverse=True,
     )[:8]
     clutch_plays = sorted(
         [row for row in plays if row["t"] >= clutch_cutoff],
-        key=lambda item: (item["impact"], -item["t"]),
+        key=lambda item: (float(item.get("swing_points") or 0.0), -float(item.get("t") or 0.0)),
         reverse=True,
     )[:6]
     final_probability = 1.0 / (1.0 + math.exp(-max(min(score, 8.0), -8.0)))
-    largest_swing = max(ledger, key=lambda row: abs(row["impact"]), default=None)
+    largest_swing = max(ledger, key=lambda row: abs(float(row.get("swing_points") or 0.0)), default=None)
     return {
         "base_blue_probability": round(base_probability, 4),
         "final_blue_probability": round(final_probability, 4),
         "volatility": round(sum(abs(row["impact"]) for row in ledger), 4),
-        "volatility_points": round(sum(abs(float(row.get("probability_swing") or 0.0)) for row in ledger) * 100.0, 1),
-        "swing_count": sum(1 for row in ledger if abs(row["impact"]) >= 0.25),
+        "volatility_points": volatility_points,
+        "swing_count": sum(1 for row in ledger if abs(float(row.get("swing_points") or 0.0)) >= major_swing_threshold),
+        "event_count": len(ledger),
         "largest_swing": largest_swing,
         "largest_swing_points": round(abs(float(largest_swing.get("probability_swing") or 0.0)) * 100.0, 1) if largest_swing else None,
         "blunders": blunders,
         "plays": plays,
         "clutch_plays": clutch_plays,
         "player_net": [
-            {"player_name": name, "impact": round(value, 4)}
-            for name, value in sorted(player_totals.items(), key=lambda item: abs(item[1]), reverse=True)[:10]
+            {
+                "player_name": name,
+                "impact": round(player_totals.get(name, 0.0), 4),
+                "net_probability_swing": round(player_probability_totals.get(name, 0.0), 4),
+                "net_swing_points": round(player_probability_totals.get(name, 0.0) * 100.0, 1),
+            }
+            for name, _ in sorted(player_probability_totals.items(), key=lambda item: abs(item[1]), reverse=True)[:10]
         ],
         "team_net": {
-            color: round(value, 4)
+            color: round(value * 100.0, 1)
             for color, value in team_totals.items()
         },
     }
@@ -2333,6 +2380,7 @@ def _replay_eval_details(events: list[dict[str, Any]], predictions: list[dict[st
     ordered = sorted(events, key=lambda row: (float(row.get("t") or 0.0), int(row.get("event_id") or 0)))
     ledger: list[dict[str, Any]] = []
     player_totals: dict[str, float] = {}
+    player_probability_totals: dict[str, float] = {}
     team_totals = {"blue": 0.0, "orange": 0.0}
     for event in ordered:
         delta = _edge_delta(event)
@@ -2370,14 +2418,16 @@ def _replay_eval_details(events: list[dict[str, Any]], predictions: list[dict[st
         ledger.append(row)
         if actor_player:
             player_totals[actor_player] = player_totals.get(actor_player, 0.0) + actor_edge
+            player_probability_totals[actor_player] = player_probability_totals.get(actor_player, 0.0) + actor_probability_swing
         if actor_team in team_totals:
-            team_totals[actor_team] += actor_edge
+            team_totals[actor_team] += actor_probability_swing
     return {
         "base_probability": base_probability,
         "score": score,
         "ordered": ordered,
         "ledger": ledger,
         "player_totals": player_totals,
+        "player_probability_totals": player_probability_totals,
         "team_totals": team_totals,
     }
 

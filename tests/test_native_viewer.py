@@ -76,6 +76,7 @@ class NativeViewerPayloadTests(unittest.TestCase):
         self.assertEqual(payload["replayData"]["ball"][0], [0.0, 0.0, 92.75, 0.0, 0.0, 0.0])
         self.assertEqual(payload["replayData"]["players"][0][0], [10.0, 20.0, 30.0, 0.1, 0.2, 0.3, False, 50.0])
         self.assertEqual(payload["replayData"]["players"][0][1], [12.0, 22.0, 32.0, 0.11, 0.21, 0.31, True, 45.0])
+        self.assertEqual(payload["hud"]["boost_by_player"]["blue-1"], [50.0, 45.0])
         self.assertEqual(payload["hud"]["pad_state_masks"], [1, 0])
         self.assertEqual(payload["replayMetadata"]["gameMetadata"]["goals"], [{"frameNumber": 1, "playerId": {"id": "blue-1"}}])
         self.assertEqual(payload["replayMetadata"]["players"][0]["loadout"]["car"], 4284)

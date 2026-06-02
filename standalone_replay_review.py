@@ -318,7 +318,10 @@ def workspace_connection(
             creator_ids=config.get("creator_ids") or [],
             creator_group_limit=int(config.get("creator_group_limit") or DEFAULT_CONFIG["creator_group_limit"]),
         ):
-            con = duckdb.connect(str(paths["serving_db"]), read_only=read_only)
+            # DuckDB does not let one process mix read-only and read-write handles
+            # against the same file. The standalone app needs import/sync/write paths
+            # anyway, so keep one consistent local connection mode.
+            con = duckdb.connect(str(paths["serving_db"]), read_only=False)
             try:
                 yield paths, config, con
             finally:
@@ -401,7 +404,8 @@ def local_review_payload(
         "viewer": viewer,
         "replay": replay,
         "counts": counts,
-        "native_viewer_url": f"/native-viewer/index.html?replayId={replay_id}&apiBase=",
+        "native_viewer_url": f"/native-viewer/index.html?replayId={replay_id}&apiBase=&embed=1",
+        "native_full_viewer_url": f"/native-viewer/index.html?replayId={replay_id}&apiBase=",
         "file_url": f"/api/replays/{replay_id}/file",
         "json_url": f"/api/replays/{replay_id}/viewer",
     }
@@ -789,7 +793,8 @@ def homepage_html() -> str:
     }
     iframe {
       width: 100%;
-      min-height: 760px;
+      height: clamp(48rem, 92vh, 78rem);
+      min-height: 780px;
       background: #040608;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -862,7 +867,7 @@ def homepage_html() -> str:
     }
     @media (max-width: 980px) {
       .panel-grid, .summary-grid, .detail-grid, .boxscores, .inline-grid, .state-strip { grid-template-columns: 1fr; }
-      iframe { min-height: 560px; }
+      iframe { min-height: 640px; }
       .library-list { max-height: none; }
     }
   </style>
@@ -1148,6 +1153,7 @@ def homepage_html() -> str:
       selectedReplayId: null,
       selectedReplayCard: null,
       currentReviewPayload: null,
+      nativeFrameTimer: null,
       libraryOffset: 0,
       libraryLimit: 40,
       libraryHasMore: false,
@@ -1195,6 +1201,17 @@ def homepage_html() -> str:
       if (!value) return 'Untitled';
       if (value.length <= max) return value;
       return `${value.slice(0, max - 3)}...`;
+    }
+
+    function reviewVolText(review) {
+      if (!review) return 'Review pending';
+      if (review.volatility_points !== null && review.volatility_points !== undefined && !Number.isNaN(Number(review.volatility_points))) {
+        return `Vol ${fmtNumber(review.volatility_points, 1)} pts | ${review.swing_count || 0} swings`;
+      }
+      if (review.volatility !== null && review.volatility !== undefined && !Number.isNaN(Number(review.volatility))) {
+        return `Vol ${fmtNumber(review.volatility, 2)} | ${review.swing_count || 0} swings`;
+      }
+      return 'Review pending';
     }
 
     function reviewNote(review) {
@@ -1329,7 +1346,7 @@ def homepage_html() -> str:
             <span>${escapeHtml(parseLabel)}</span>
             <div>
               <strong>${escapeHtml(`${replay.blue_team_name || 'Blue'} ${replay.blue_goals ?? 0} - ${replay.orange_goals ?? 0} ${replay.orange_team_name || 'Orange'}`)}</strong>
-              <em class="meta">${escapeHtml(review ? `Vol ${fmtNumber(review.volatility, 2)} | ${review.swing_count || 0} swings` : 'Open the review workspace to build the full match breakdown.')}</em>
+              <em class="meta">${escapeHtml(review ? reviewVolText(review) : 'Open the review workspace to build the full match breakdown.')}</em>
             </div>
           </div>
           <div class="stack-row">
@@ -1379,7 +1396,7 @@ def homepage_html() -> str:
             <div class="library-review-row">
               <div class="meta">
                 <div>${escapeHtml(item.blue_team_name || 'Blue')} vs ${escapeHtml(item.orange_team_name || 'Orange')}</div>
-                <div>${review ? `Vol ${fmtNumber(review.volatility, 2)} | ${review.swing_count || 0} swings` : reviewNote(null)}</div>
+                <div>${review ? reviewVolText(review) : reviewNote(null)}</div>
                 <div>${escapeHtml(review ? reviewNote(review) : 'Open the replay to build the full review view.')}</div>
               </div>
               ${parseTag}
@@ -1422,14 +1439,50 @@ def homepage_html() -> str:
       const cards = [
         ['Blue win', fmtPercent(evalData.final_blue_probability), `Start ${fmtPercent(evalData.base_blue_probability)}`],
         ['Orange win', evalData.final_blue_probability === null || evalData.final_blue_probability === undefined ? 'n/a' : fmtPercent(1 - Number(evalData.final_blue_probability)), 'Live edge from replay events'],
-        ['Volatility', fmtSwingPoints(evalData.volatility_points), `${(evalData.plays || []).length + (evalData.blunders || []).length} major swings`],
+        ['Volatility', fmtSwingPoints(evalData.volatility_points), `${fmtNumber(evalData.swing_count, 0)} major swings`],
         ['Swing count', fmtNumber(evalData.swing_count, 0), evalData.largest_swing ? `${fmtSwingPoints(evalData.largest_swing.swing_points)} at ${fmtNumber(evalData.largest_swing.t, 1)}s` : 'No swing registered'],
         ['Largest blunder', (evalData.blunders || [])[0]?.player_name || 'None yet', (evalData.blunders || [])[0] ? `${fmtSwingPoints(evalData.blunders[0].swing_points)} at ${fmtNumber(evalData.blunders[0].t, 1)}s` : 'No major blunder flagged'],
         ['Clutch play', (evalData.clutch_plays || [])[0]?.player_name || 'None yet', (evalData.clutch_plays || [])[0] ? `${fmtSwingPoints(evalData.clutch_plays[0].swing_points)} at ${fmtNumber(evalData.clutch_plays[0].t, 1)}s` : 'No late-game dagger flagged'],
-        ['Impact leader', impact[0]?.player_name || 'None yet', impact[0] ? `${impact[0].goals || 0} G, ${impact[0].positive_swings || 0} positive swings` : 'Waiting for impact breakdown'],
+        ['Impact leader', impact[0]?.player_name || 'None yet', impact[0] ? `${impact[0].goals || 0} G, ${impact[0].positive_swings || 0} positive swings, ${fmtSwingPoints(impact[0].net_swing_points)} net` : 'Waiting for impact breakdown'],
         ['Scoreline', `${replay.blue_team_name || 'Blue'} ${replay.blue_goals ?? 0} - ${replay.orange_goals ?? 0} ${replay.orange_team_name || 'Orange'}`, replay.map_code || 'Map pending'],
       ];
       return cards.map(([label, value, note]) => `<article class="summary-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><em class="meta">${escapeHtml(note)}</em></article>`).join('');
+    }
+
+    function stopNativeFrameAutoSize() {
+      if (state.nativeFrameTimer) {
+        clearInterval(state.nativeFrameTimer);
+        state.nativeFrameTimer = null;
+      }
+    }
+
+    function syncNativeFrameHeight() {
+      const frame = document.getElementById('native-frame');
+      if (!frame) return;
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        const nextHeight = Math.max(
+          doc.documentElement?.scrollHeight || 0,
+          doc.body?.scrollHeight || 0,
+          780,
+        );
+        frame.style.height = `${Math.min(nextHeight + 16, 1700)}px`;
+      } catch (error) {
+        // same-origin viewer height sync can fail briefly while the iframe is loading
+      }
+    }
+
+    function startNativeFrameAutoSize() {
+      const frame = document.getElementById('native-frame');
+      if (!frame) return;
+      stopNativeFrameAutoSize();
+      const onLoad = () => {
+        syncNativeFrameHeight();
+        stopNativeFrameAutoSize();
+        state.nativeFrameTimer = setInterval(syncNativeFrameHeight, 900);
+      };
+      frame.onload = onLoad;
     }
 
     function buildEdgeBar(edge) {
@@ -1490,15 +1543,19 @@ def homepage_html() -> str:
       document.getElementById('edge-bar').innerHTML = buildEdgeBar(viewer.win_edge || {});
       document.getElementById('viewer-title').textContent = replay.title || payload.replay_id;
       document.getElementById('viewer-meta').textContent = `${replay.blue_team_name || 'Blue'} vs ${replay.orange_team_name || 'Orange'} | ${replay.map_code || 'Map pending'} | 60 Hz native viewer`;
-      document.getElementById('native-frame').src = `${payload.native_viewer_url}${encodeURIComponent(window.location.origin)}`;
-      document.getElementById('open-native').href = document.getElementById('native-frame').src;
+      const nativeFrame = document.getElementById('native-frame');
+      const embedUrl = `${payload.native_viewer_url}${encodeURIComponent(window.location.origin)}`;
+      const fullUrl = `${(payload.native_full_viewer_url || payload.native_viewer_url.replace('&embed=1', ''))}${encodeURIComponent(window.location.origin)}`;
+      startNativeFrameAutoSize();
+      nativeFrame.src = embedUrl;
+      document.getElementById('open-native').href = fullUrl;
       document.getElementById('download-replay').href = payload.file_url;
       document.getElementById('json-link').href = payload.json_url;
       document.getElementById('turning-points').innerHTML = stackRows((viewer.timeline?.turning_points || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtNumber(row.t, 1)}s</span><div><strong>${escapeHtml(row.label || row.event_type || 'Moment')}</strong><em class="meta">${escapeHtml(row.event_type || 'event')}</em></div></div>`);
       document.getElementById('blunders').innerHTML = stackRows((evalData.blunders || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtNumber(row.t, 1)}s</span><div><strong>${escapeHtml(row.label || 'Blunder')}</strong><em class="meta">${escapeHtml(fmtSwingPoints(row.swing_points))}</em></div></div>`);
       document.getElementById('plays').innerHTML = stackRows((evalData.plays || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtNumber(row.t, 1)}s</span><div><strong>${escapeHtml(row.label || 'Play')}</strong><em class="meta">${escapeHtml(fmtSwingPoints(row.swing_points))}</em></div></div>`);
       document.getElementById('clutch-plays').innerHTML = stackRows((evalData.clutch_plays || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtNumber(row.t, 1)}s</span><div><strong>${escapeHtml(row.label || 'Clutch play')}</strong><em class="meta">${escapeHtml(fmtSwingPoints(row.swing_points))}</em></div></div>`);
-      document.getElementById('player-impact').innerHTML = stackRows((viewer.player_impact || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtNumber(row.net_impact, 3)}</span><div><strong>${escapeHtml(row.player_name || 'Player')}</strong><em class="meta">${row.goals || 0} G, ${row.touches || 0} touches, ${row.positive_swings || 0}/${row.negative_swings || 0} swings</em></div></div>`);
+      document.getElementById('player-impact').innerHTML = stackRows((viewer.player_impact || []).slice(0, 8), (row) => `<div class="stack-row"><span>${fmtSwingPoints(row.net_swing_points)}</span><div><strong>${escapeHtml(row.player_name || 'Player')}</strong><em class="meta">${row.goals || 0} G, ${row.touches || 0} touches, ${row.positive_swings || 0}/${row.negative_swings || 0} swings, ${fmtSwingPoints(row.advantage_per_touch_points)} per touch</em></div></div>`);
       document.getElementById('model-reasons').innerHTML = stackRows((prediction.reasons || []).slice(0, 8), (row) => `<div class="stack-row"><span>${escapeHtml(row.feature || row.name || 'Reason')}</span><div><strong>${escapeHtml(fmtNumber(row.contribution ?? row.value_z ?? 0, 3))}</strong><em class="meta">${escapeHtml(fmtNumber(row.value_z ?? row.value ?? 0, 3))}</em></div></div>`);
       fillBoxscores(replay.players || [], replay.blue_team_name, replay.orange_team_name);
       renderLibrarySelection();
@@ -1545,7 +1602,8 @@ def homepage_html() -> str:
       renderReview({
         replay_id: replayId,
         viewer: payload,
-        native_viewer_url: `/native-viewer/index.html?replayId=${encodeURIComponent(replayId)}&apiBase=`,
+        native_viewer_url: `/native-viewer/index.html?replayId=${encodeURIComponent(replayId)}&apiBase=&embed=1`,
+        native_full_viewer_url: `/native-viewer/index.html?replayId=${encodeURIComponent(replayId)}&apiBase=`,
         file_url: `/api/replays/${encodeURIComponent(replayId)}/file`,
         json_url: `/api/replays/${encodeURIComponent(replayId)}/viewer`,
       });

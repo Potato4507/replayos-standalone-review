@@ -164,7 +164,7 @@ class SiteTests(unittest.TestCase):
         self.assertLess(replay_eval["blunders"][0]["swing_points"], 0.0)
         self.assertTrue(replay_eval["plays"])
         self.assertGreater(replay_eval["volatility_points"], 0.0)
-        self.assertEqual(replay_eval["swing_count"], 1)
+        self.assertEqual(replay_eval["swing_count"], 2)
 
     def test_replay_review_cache_precomputes_and_attaches_to_library_rows(self) -> None:
         con = duckdb.connect(":memory:")

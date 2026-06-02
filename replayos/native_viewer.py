@@ -12,8 +12,8 @@ from fastapi.responses import Response
 
 from .config import PROJECT_ROOT
 
-VIEWER_PAYLOAD_SCHEMA_VERSION = 2
-VIEWER_PAYLOAD_CACHE_VERSION = 2
+VIEWER_PAYLOAD_SCHEMA_VERSION = 3
+VIEWER_PAYLOAD_CACHE_VERSION = 3
 VIEWER_CACHE_ROOT = PROJECT_ROOT / "cache" / "native-viewer"
 
 DEFAULT_CAMERA_SETTINGS = {
@@ -75,6 +75,7 @@ def build_native_viewer_payload(
     ordered_players = _ordered_players(players)
     per_player_frames = {player["player_id"]: [] for player in ordered_players}
     per_player_ball_cam = {player["player_id"]: [] for player in ordered_players}
+    per_player_boost = {player["player_id"]: [] for player in ordered_players}
     previous_boost = {
         player["player_id"]: float(_frame_car(frames[0], player["player_id"]).get("boost") or 0.0)
         for player in ordered_players
@@ -114,6 +115,7 @@ def build_native_viewer_payload(
             previous_boost[player_id] = boost_value
             ball_cam = _bool_or_none(car.get("ball_cam", car.get("ballCam")))
             per_player_ball_cam[player_id].append(ball_cam)
+            per_player_boost[player_id].append(boost_value)
             per_player_frames[player_id].append([
                 _round(pos, 0),
                 _round(pos, 1),
@@ -243,6 +245,7 @@ def build_native_viewer_payload(
             "player_order": [player["player_id"] for player in ordered_players],
             "player_cards": player_cards,
             "ball_cam_by_player": per_player_ball_cam,
+            "boost_by_player": per_player_boost,
             "pad_state_masks": pad_state_masks,
             "boost_pad_layout": boost_pad_layout,
         },
