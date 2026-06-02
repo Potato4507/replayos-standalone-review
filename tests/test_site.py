@@ -378,6 +378,34 @@ class SiteTests(unittest.TestCase):
         finally:
             con.close()
 
+    def test_get_library_replay_returns_none_without_local_replays_table(self) -> None:
+        con = duckdb.connect(":memory:")
+        try:
+            con.execute(
+                """
+                CREATE TABLE remote_replays (
+                    replay_id VARCHAR,
+                    title VARCHAR,
+                    created_at TIMESTAMP,
+                    match_date TIMESTAMP,
+                    playlist_id VARCHAR,
+                    duration DOUBLE,
+                    blue_team_name VARCHAR,
+                    blue_goals BIGINT,
+                    orange_team_name VARCHAR,
+                    orange_goals BIGINT,
+                    local_file_path VARCHAR,
+                    downloaded_at TIMESTAMP,
+                    group_ids_json VARCHAR,
+                    group_names_json VARCHAR,
+                    raw_json VARCHAR
+                )
+                """
+            )
+            self.assertIsNone(get_library_replay(con, "missing-replay"))
+        finally:
+            con.close()
+
     def test_library_replays_merges_remote_and_local_corpus(self) -> None:
         con = duckdb.connect(":memory:")
         try:

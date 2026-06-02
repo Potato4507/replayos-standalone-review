@@ -1022,6 +1022,8 @@ def get_library_replay(con: duckdb.DuckDBPyConnection, replay_id: str) -> dict[s
         if review_payload:
             replay["review"] = review_payload["summary"]
         return replay
+    if not table_exists(con, "replays"):
+        return None
     parsed_join = "LEFT JOIN replay_parsed_status ps USING (replay_id)" if table_exists(con, "replay_parsed_status") else ""
     local = _fetch(
         con,
