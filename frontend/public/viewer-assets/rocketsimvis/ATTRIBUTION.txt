@@ -1,0 +1,3 @@
+RocketSimVis viewer assets are used here with attribution to ZealanL.
+Source: https://github.com/ZealanL/RocketSimVis
+Repository README states: "You are welcome to use my models for whatever you like so long as you credit me."
