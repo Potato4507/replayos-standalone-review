@@ -1,6 +1,6 @@
 import unittest
 
-from standalone_replay_review import normalize_replay_id
+from standalone_replay_review import normalize_replay_id, parse_source_inputs
 
 
 class StandaloneReplayReviewTests(unittest.TestCase):
@@ -19,6 +19,24 @@ class StandaloneReplayReviewTests(unittest.TestCase):
     def test_normalize_replay_id_rejects_noise(self) -> None:
         with self.assertRaises(ValueError):
             normalize_replay_id("not a replay")
+
+    def test_parse_source_inputs_splits_groups_and_creators(self) -> None:
+        parsed = parse_source_inputs(
+            "https://ballchasing.com/group/ewc-rl-2025-d7nloy3ch5\nhttps://ballchasing.com/group/gamers8-l5u17eo7y7",
+            "https://ballchasing.com/groups?creator=76561199225615730",
+        )
+        self.assertEqual(
+            parsed["groups"],
+            ["ewc-rl-2025-d7nloy3ch5", "gamers8-l5u17eo7y7"],
+        )
+        self.assertEqual(parsed["creators"], ["76561199225615730"])
+        self.assertEqual(parsed["invalid"], [])
+
+    def test_parse_source_inputs_reports_invalid_values(self) -> None:
+        parsed = parse_source_inputs("https://example.com/not-ballchasing", "")
+        self.assertEqual(parsed["groups"], [])
+        self.assertEqual(parsed["creators"], [])
+        self.assertEqual(parsed["invalid"], ["https://example.com/not-ballchasing"])
 
 
 if __name__ == "__main__":

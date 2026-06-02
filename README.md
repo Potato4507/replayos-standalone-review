@@ -36,13 +36,21 @@ If you leave `VITE_API_BASE` unset, the site defaults to `http://127.0.0.1:8000`
 
 For the core local site, no extra key is required.
 
-If you want the smallest single-replay local tool instead of the full site, run:
+If you want the review-only local platform instead of the full site, run:
 
 ```powershell
 python standalone_replay_review.py
 ```
 
-That starts a standalone Ballchasing replay-review app at `http://127.0.0.1:8010`. Full instructions are in [docs/standalone-replay-review.md](/D:/RocketLeagueFrames/docs/standalone-replay-review.md).
+That starts the local ReplayOS review platform at `http://127.0.0.1:8010`. It has:
+
+- saved Ballchasing token support
+- creator/group source sync
+- optional auto-sync
+- a replay shelf
+- the review viewer stack
+
+Full instructions are in [docs/standalone-replay-review.md](/D:/RocketLeagueFrames/docs/standalone-replay-review.md).
 
 To enable replay downloading from Ballchasing, set:
 

@@ -1,23 +1,42 @@
-# Standalone Replay Review
+# Review-Only ReplayOS
 
 ## What this is
 
-`standalone_replay_review.py` is the smallest self-serve slice of ReplayOS that still feels useful:
+`standalone_replay_review.py` is now a small local review platform, not a one-replay demo.
 
-- one Ballchasing replay id or URL
-- one Ballchasing API token
-- local replay download
-- local 60 Hz Carball parse
-- review cards
-- win-edge timeline
-- player impact
-- native 3D replay viewer
+It gives people:
 
-It does **not** need GPT, YouTube, RLTracker, RLCS schedule APIs, or any paid add-ons.
+- a saved Ballchasing API token
+- saved Ballchasing creator and group sources
+- optional background auto-sync
+- a local replay shelf
+- the ReplayOS review stack for any replay in that shelf
+- the native 60 Hz 3D viewer
 
-## Who this is for
+This is meant to feel like the ReplayOS review tab pulled out into its own product.
 
-Use this when you want to hand someone a free local tool that reviews one replay at a time without asking them to run the full ReplayOS site and background pipeline.
+## What it does
+
+The app keeps one shared local workspace under:
+
+```text
+output/review-platform/
+```
+
+That workspace contains:
+
+- `review-platform.duckdb`
+- `replays/`
+- `platform-config.json`
+
+From there, the platform can:
+
+1. import one replay by Ballchasing replay id or URL
+2. sync whole Ballchasing groups
+3. sync creator feeds and expand them into groups
+4. parse downloaded replays into local 60 Hz telemetry
+5. build review payloads on demand
+6. open the native replay viewer from the same local shelf
 
 ## Quick start
 
@@ -34,126 +53,100 @@ Open:
 http://127.0.0.1:8010
 ```
 
-Paste:
+Then:
 
-1. a Ballchasing replay URL or replay id
-2. your Ballchasing API token
-3. optionally check `Force re-download and re-parse`
+1. save your Ballchasing API token
+2. add one or more group ids / group URLs or creator ids / creator URLs
+3. choose whether auto-sync should run
+4. click `Sync sources now`
+5. open a replay from the shelf
 
-Then click `Prepare review`.
+You can also skip the source setup and just import one replay directly.
 
-## What it does on the first run
+## Why this is different from the full site
 
-For a replay like `92aa7211-d35d-4b3c-b93f-8a9faf21ac24`, the standalone tool:
+This platform is intentionally narrower than full ReplayOS:
 
-1. calls Ballchasing for replay metadata
-2. downloads the `.replay` file locally
-3. parses the replay into 60 Hz telemetry with the existing local Carball pipeline
-4. stores a tiny standalone DuckDB workspace just for that replay
-5. builds the review payload
-6. serves the native viewer from the local static assets already in this repo
+- no live RLCS pages
+- no records dashboard
+- no global stats portal
+- no analyst desk
+- no required GPT usage
 
-The per-replay workspace lands here:
+It focuses on one thing: replay review.
 
-```text
-output/standalone-review/<replay-id>/
-```
+## What it reuses from the main app
 
-That folder contains:
+This is still using the real ReplayOS internals:
 
-- `standalone.duckdb`
-- `replays/<replay-id>.replay`
-
-## What it reuses from ReplayOS
-
-This standalone app deliberately reuses the real internals instead of shipping a fake demo path:
-
-- Ballchasing download flow from `replayos.ballchasing`
+- Ballchasing sync and download flow from `replayos.ballchasing`
 - 60 Hz replay parsing from `replayos.carball_ingest`
-- review math from `replayos.site`
+- replay shelf queries from `replayos.site`
+- review payload generation from `replayos.site`
 - native viewer payload generation from `replayos.native_viewer`
 - native viewer frontend from `frontend/public/native-viewer`
 
-That means the standalone output stays aligned with the main app instead of drifting into a separate half-maintained fork.
+That keeps the review-only app aligned with the main codebase instead of becoming a fake fork.
 
-## Endpoints
+## Main routes
 
-Useful local routes:
+- `/`
+  Review-only local UI
 
-- `/`  
-  The standalone web UI.
+- `/api/status`
+  Workspace counts, source settings summary, and sync state
 
-- `/api/review`  
-  POST JSON to prepare a replay and return the review payload.
+- `/api/config`
+  Save token, group sources, creator sources, and auto-sync settings
 
-- `/library/replays/<replay-id>/viewer`  
-  The standalone review JSON for an already-prepared replay.
+- `/api/replays/import`
+  Import one replay into the local shelf
 
-- `/library/replays/<replay-id>/native-viewer`  
-  The native viewer payload route used by the embedded 3D viewer.
+- `/api/sources/sync`
+  Sync configured creator/group sources
 
-- `/library/replays/<replay-id>/file`  
-  Download the local replay file.
+- `/api/replays`
+  Shelf listing with search, parsed-only, review-ready, and sort options
 
-## Example JSON request
+- `/api/replays/{replay_id}/viewer`
+  Full replay review payload for one replay
 
-```json
-{
-  "replay_input": "https://ballchasing.com/replay/92aa7211-d35d-4b3c-b93f-8a9faf21ac24",
-  "ballchasing_api_token": "YOUR_TOKEN_HERE",
-  "force_refresh": false
-}
-```
+- `/api/replays/{replay_id}/native-viewer`
+  Native 3D viewer payload
 
-## Free stack
+- `/api/replays/{replay_id}/file`
+  Download the local replay file
 
-This standalone path is intentionally cheap:
+The `/library/...` aliases still exist so the embedded native viewer keeps working cleanly.
+
+## Auto-sync
+
+If `auto_sync_enabled` is turned on in the UI, the app runs a small background worker in-process.
+
+That worker:
+
+- reads the saved creator/group sources
+- waits for the configured interval
+- pulls new Ballchasing replays
+- downloads the replay files
+- parses them locally
+- adds them to the shelf
+
+This is meant for a local single-user setup, not a hosted multi-user deployment.
+
+## Cost profile
+
+This path stays cheap:
 
 - Ballchasing token: required
-- Local CPU/GPU: required
+- Local machine: required
 - GPT: not required
 - YouTube API: not required
 - RLTracker API: not required
-- Live RLCS schedule APIs: not required
+- paid live data APIs: not required
 
-## Design choices
+## Notes
 
-### Why one replay at a time?
-
-That keeps the setup simple:
-
-- no site-wide background sync
-- no giant shared database
-- no paid enrichment dependencies
-- easier to explain
-
-### Why a local workspace per replay?
-
-It makes the tool easy to reason about and easy to delete:
-
-- each replay is isolated
-- reruns are cheap
-- users can keep just the replays they care about
-
-## Limitations
-
-- It is a **local single-user tool**, not a multi-tenant hosted service.
-- The standalone app temporarily overrides a few ReplayOS env-backed settings during request handling so it can point the reused internals at the standalone workspace.
-- The 3D viewer is only as good as the local native viewer assets and current camera logic.
-- This version focuses on replay review, not the larger tournament/live-site feature set.
-
-## Shipping this to GitHub
-
-The easiest publish shape is:
-
-1. keep `standalone_replay_review.py`
-2. keep this doc
-3. keep the existing native viewer assets in the repo
-4. tell users to run only:
-
-```powershell
-pip install -e .
-python standalone_replay_review.py
-```
-
-That gives people a very short path from clone to usable replay review.
+- The Ballchasing token is stored locally in `platform-config.json` because the app is designed for local use.
+- The native viewer is the same local viewer stack used by the main ReplayOS project.
+- This is best thought of as a review workstation, not a public hosted SaaS app.
